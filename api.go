@@ -24,7 +24,7 @@ import (
 
 type OapiRegisterFunc func(*echo.Echo)
 
-type CustomErrorHandler (func(status int, err error, ctx echo.Context))
+type CustomErrorHandler (func(status int, message string, ctx echo.Context))
 type CustomApiAuthentication func(ctx echo.Context, apitoken, sourceIP string) (email string, firstname string, lastname string, valid bool, apiError interface{})
 
 type apiSpecification struct {
@@ -228,15 +228,29 @@ func (b *APIBuilder) Run(listenPort int) error {
 	//-- custom error handler
 	if b.customErrorHandler != nil {
 		b.echo.HTTPErrorHandler = func(err error, c echo.Context) {
+
+			//-- create only a response if no response has been sent yet, otherwise just log the error
+			if c.Response().Committed {
+				return
+			}
+
 			status := http.StatusInternalServerError
+			message := "Internal Server Error"
 			var he *echo.HTTPError
 			if errors.As(err, &he) {
 				status = he.Code
+				message = fmt.Sprintf("%v", he.Message)
 			}
-			b.customErrorHandler(status, err, c)
+			b.customErrorHandler(status, message, c)
 		}
 	} else {
 		b.echo.HTTPErrorHandler = func(err error, c echo.Context) {
+
+			//-- create only a response if no response has been sent yet, otherwise just log the error
+			if c.Response().Committed {
+				return
+			}
+
 			status := http.StatusInternalServerError
 			var he *echo.HTTPError
 			if errors.As(err, &he) {
