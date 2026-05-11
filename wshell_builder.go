@@ -187,7 +187,7 @@ func (b *APIBuilder) WithApplicationName(appName string) *APIBuilder {
 	return b
 }
 
-func (b *APIBuilder) WithSwagger(enable bool) *APIBuilder {
+func (b *APIBuilder) EnableSwagger(enable bool) *APIBuilder {
 	b.enableSwagger = enable
 	return b
 }
