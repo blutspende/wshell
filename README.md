@@ -1,6 +1,6 @@
 # wshell
 
-Webservice Basis for our projects
+
 
 Install with
 ```shell
@@ -22,9 +22,14 @@ err = wshell.NewWebServer('testapp').
 ```
 
 
-# Cool features
+# Features
 
-Get SourceIp, Username from context
+## Getting request information from the context
+
+You can get information about the caller from the context
+
+Example:
+```userEmail, _ := ctx.Get(wshell.ContextKey_UserEmail).(string)```
 
   * ContextKey_UserID       
   * ContextKey_UserEmail    
@@ -35,5 +40,21 @@ Get SourceIp, Username from context
   * ContextKey_SourceIP     
   * ContextKey_Correlation  
 
-Example
-```userEmail, _ := ctx.Get(wshell.ContextKey_UserEmail).(string)```
+## Custom error handling
+
+When using a custom error format, you can use the CustomErrorHandling from the builder to apply your own error-formats. This also catches
+the validation errors returned by the api validation.
+
+Example:
+```
+  w := wshell.NewWebserver("example").
+      CustomErrorHandling(func(status int, message string, ctx echo.Context) {			
+
+			_ = ctx.JSON(status, map[string]string{
+				"Subcode": "418",
+				"Message": message,
+			}).
+      ...
+      Run(8080)
+		}
+```

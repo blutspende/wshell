@@ -57,8 +57,8 @@ type APIBuilder struct {
 func NewWebServer(appName string) *APIBuilder {
 	builder := &APIBuilder{
 		echo:             echo.New(),
-		enablePrometheus: true,
-		enableSwagger:    true,
+		enablePrometheus: false,
+		enableSwagger:    false,
 		//enableOpenTelemetry: false,
 		//	oapi:                  []oapidescriptor{},
 		request_threshold:    -1,
