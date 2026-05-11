@@ -1,4 +1,4 @@
-module wshell
+module github.com/blutspende/wshell
 
 go 1.25.3
 
