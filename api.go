@@ -1,6 +1,7 @@
 package wshell
 
 import (
+	"errors"
 	"fmt"
 	"mime"
 	"net/http"
@@ -23,7 +24,7 @@ import (
 
 type OapiRegisterFunc func(*echo.Echo)
 
-type CustomErrorHandler (func(error, echo.Context))
+type CustomErrorHandler (func(status int, err error, ctx echo.Context))
 type CustomApiAuthentication func(ctx echo.Context, apitoken, sourceIP string) (email string, firstname string, lastname string, valid bool, apiError interface{})
 
 type apiSpecification struct {
@@ -227,7 +228,27 @@ func (b *APIBuilder) Run(listenPort int) error {
 	//-- custom error handler
 	if b.customErrorHandler != nil {
 		b.echo.HTTPErrorHandler = func(err error, c echo.Context) {
-			b.customErrorHandler(err, c)
+			status := http.StatusInternalServerError
+			var he *echo.HTTPError
+			if errors.As(err, &he) {
+				status = he.Code
+			}
+			b.customErrorHandler(status, err, c)
+		}
+	} else {
+		b.echo.HTTPErrorHandler = func(err error, c echo.Context) {
+			status := http.StatusInternalServerError
+			var he *echo.HTTPError
+			if errors.As(err, &he) {
+				status = he.Code
+			}
+
+			//-- Error messages are returned with status if not internal
+			if status != http.StatusInternalServerError {
+				c.String(status, err.Error())
+			} else {
+				c.String(status, "Internal Server Error")
+			}
 		}
 	}
 
