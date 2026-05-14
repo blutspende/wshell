@@ -25,7 +25,7 @@ import (
 type OapiRegisterFunc func(*echo.Echo)
 
 type CustomErrorHandler (func(status int, message string, ctx echo.Context))
-type CustomApiAuthentication func(ctx echo.Context, apitoken, sourceIP string) (email string, firstname string, lastname string, valid bool, apiError interface{})
+type CustomApiAuthentication func(ctx echo.Context, apitoken, sourceIP string) (email string, firstname string, lastname string, valid bool, err error)
 
 type apiSpecification struct {
 	basePath string

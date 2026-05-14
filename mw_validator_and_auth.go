@@ -95,10 +95,10 @@ func AuthMiddleware(basePath string, spec *openapi3.T, oidcBaseURL *string,
 					if echoCtx.Get(ContextKey_SourceIP) != nil {
 						sourceIP = echoCtx.Get(ContextKey_SourceIP).(string)
 					}
-					email, firstname, lastname, valid, apiError := customAPITokenChecker(echoCtx, apiToken, sourceIP)
+					email, firstname, lastname, valid, err := customAPITokenChecker(echoCtx, apiToken, sourceIP)
 					if !valid {
-						if apiError != nil {
-							return echo.NewHTTPError(http.StatusUnauthorized, apiError)
+						if err != nil {
+							return echo.NewHTTPError(http.StatusUnauthorized, err)
 						}
 						return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
 					}
