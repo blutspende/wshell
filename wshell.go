@@ -42,10 +42,11 @@ type APIBuilder struct {
 	logger                zerolog.Logger
 	servers               *[]string
 	oidcBaseURL           *string
-	request_threshold     int
-	request_window        time.Duration
-	allow_origins         []string
-	allow_methods         []string
+	requestThreshold      int
+	requestWindow         time.Duration
+	allowOrigins          []string
+	allowMethods          []string
+	allowHeaders          []string
 	additionalMiddlewares []echo.MiddlewareFunc
 	applicationName       string
 	specifications        map[string]*apiSpecification
@@ -61,10 +62,11 @@ func NewWebServer(appName string) *APIBuilder {
 		enableSwagger:    false,
 		//enableOpenTelemetry: false,
 		//	oapi:                  []oapidescriptor{},
-		request_threshold:    -1,
-		request_window:       0,
-		allow_origins:        []string{"*"},
-		allow_methods:        []string{echo.GET, echo.POST, echo.PUT, echo.PATCH, echo.DELETE, echo.OPTIONS},
+		requestThreshold:     -1,
+		requestWindow:        0,
+		allowOrigins:         []string{"*"},
+		allowMethods:         []string{echo.GET, echo.POST, echo.PUT, echo.PATCH, echo.DELETE, echo.OPTIONS},
+		allowHeaders:         []string{"Authorization", "Content-Type", "X-API-Key"},
 		enableRolevalidation: false,
 		applicationName:      appName,
 		specifications:       make(map[string]*apiSpecification),
@@ -82,8 +84,8 @@ func (b *APIBuilder) Run(listenPort int) error {
 	b.echo.Use(SourceIP())
 	b.echo.Use(CorrelationContextEnricher(&b.logger))
 	b.echo.Use(RequestLogger(&b.logger))
-	if b.request_threshold > 0 {
-		b.echo.Use(RateLimiter(b.redisCache, b.request_threshold, b.request_window))
+	if b.requestThreshold > 0 {
+		b.echo.Use(RateLimiter(b.redisCache, b.requestThreshold, b.requestWindow))
 	}
 
 	//-- use opentelemetry
@@ -155,9 +157,9 @@ func (b *APIBuilder) Run(listenPort int) error {
 	//-- CORS middleware must run before OpenAPI validation so browser preflight
 	//-- OPTIONS requests are answered by CORS instead of being rejected
 	b.echo.Use(echo4mw.CORSWithConfig(echo4mw.CORSConfig{
-		AllowOrigins:     b.allow_origins,
-		AllowMethods:     b.allow_methods,
-		AllowHeaders:     []string{"Authorization", "Content-Type", "X-API-Key"},
+		AllowOrigins:     b.allowOrigins,
+		AllowMethods:     b.allowMethods,
+		AllowHeaders:     b.allowHeaders,
 		AllowCredentials: true,
 	}))
 

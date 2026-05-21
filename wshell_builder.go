@@ -62,19 +62,24 @@ func (b *APIBuilder) WithAuthentication(oidcBaseURL string) *APIBuilder {
 
 // ThrottleRequests enables request throttling with the given threshold and window
 func (b *APIBuilder) ThrottleRequests(threshold int, window time.Duration) *APIBuilder {
-	b.request_threshold = threshold
-	b.request_window = window
+	b.requestThreshold = threshold
+	b.requestWindow = window
 	return b
 }
 
 // AllowOrigins sets the allowed origins for CORS
 func (b *APIBuilder) AllowOrigins(origins ...string) *APIBuilder {
-	b.allow_origins = origins
+	b.allowOrigins = origins
 	return b
 }
 
 func (b *APIBuilder) AllowMethods(methods ...string) *APIBuilder {
-	b.allow_methods = methods
+	b.allowMethods = methods
+	return b
+}
+
+func (b *APIBuilder) AllowHeaders(headers ...string) *APIBuilder {
+	b.allowHeaders = headers
 	return b
 }
 
