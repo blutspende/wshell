@@ -1,6 +1,8 @@
 package wshell
 
 import (
+	"net"
+	"net/netip"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -10,25 +12,22 @@ func SourceIP() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			// Try Cloudflare header first
-			ip := c.Request().Header.Get("CF-Connecting-IP")
-			if ip == "" {
+			ip := strings.TrimSpace(c.Request().Header.Get("CF-Connecting-IP"))
+			if ip != "" {
+				ip = canonicalIP(ip)
+			} else {
 				// Fallback to X-Forwarded-For
-				ip = c.Request().Header.Get("X-Forwarded-For")
-				if ip != "" {
-					if idx := strings.LastIndex(ip, ","); idx != -1 {
-						ip = ip[idx+1:]
-					}
-					ip = strings.TrimSpace(ip)
+				forwardedFor := c.Request().Header.Get("X-Forwarded-For")
+				if idx := strings.LastIndex(forwardedFor, ","); idx != -1 {
+					forwardedFor = forwardedFor[idx+1:]
 				}
+				forwardedFor = strings.TrimSpace(forwardedFor)
 
-				if ip == "" {
+				if forwardedFor != "" {
+					ip = canonicalIP(forwardedFor)
+				} else {
 					// Final fallback to RemoteAddr
-					ip = c.Request().RemoteAddr
-					if idx := strings.LastIndex(ip, ":"); idx != -1 {
-						ip = ip[:idx] + "/32"
-					} else {
-						ip = ip + "/32"
-					}
+					ip = canonicalRemoteIP(c.Request().RemoteAddr)
 				}
 			}
 
@@ -36,4 +35,22 @@ func SourceIP() echo.MiddlewareFunc {
 			return next(c)
 		}
 	}
+}
+
+func canonicalRemoteIP(remoteAddr string) string {
+	remoteAddr = strings.TrimSpace(remoteAddr)
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		remoteAddr = host
+	}
+
+	return canonicalIP(remoteAddr)
+}
+
+func canonicalIP(value string) string {
+	addr, err := netip.ParseAddr(strings.TrimSpace(value))
+	if err != nil {
+		return ""
+	}
+
+	return addr.Unmap().String()
 }
