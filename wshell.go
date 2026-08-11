@@ -38,7 +38,7 @@ type APIBuilder struct {
 	enablePrometheus      bool
 	enableSwagger         bool
 	enableOpenTelemetry   bool
-	enableRolevalidation  bool
+	enableRoleValidation  bool
 	logger                zerolog.Logger
 	servers               *[]string
 	oidcBaseURL           *string
@@ -67,7 +67,7 @@ func NewWebServer(appName string) *APIBuilder {
 		allowOrigins:         []string{"*"},
 		allowMethods:         []string{echo.GET, echo.POST, echo.PUT, echo.PATCH, echo.DELETE, echo.OPTIONS},
 		allowHeaders:         []string{"Authorization", "Content-Type", "X-API-Key"},
-		enableRolevalidation: false,
+		enableRoleValidation: false,
 		applicationName:      appName,
 		specifications:       make(map[string]*apiSpecification),
 	}
@@ -78,6 +78,13 @@ func NewWebServer(appName string) *APIBuilder {
 }
 
 func (b *APIBuilder) Run(listenPort int) error {
+	if b.enableRoleValidation {
+		for name, spec := range b.specifications {
+			if err := validateRoleExtensions(spec.doc); err != nil {
+				return fmt.Errorf("invalid role configuration in OpenAPI specification %q: %w", name, err)
+			}
+		}
+	}
 
 	//-- fundamental middlewares
 	b.echo.Use(SetCorrelationID())
@@ -211,9 +218,9 @@ func (b *APIBuilder) Run(listenPort int) error {
 			b.echo.Use(AuthMiddleware(spec.basePath, spec.doc, b.oidcBaseURL, b.CustomAPITokenChecker))
 			b.echo.Use(ValidatorMiddleware(spec.basePath, spec.doc, xmlSkipper))
 
-			// Check x-role annotations if enabled
-			if b.enableRolevalidation {
-				b.echo.Use(RoleValidator(spec.doc))
+			// Enforce operation-level x-roles annotations if enabled.
+			if b.enableRoleValidation {
+				b.echo.Use(roleValidatorForBasePath(spec.basePath, spec.doc))
 			}
 		}
 	}

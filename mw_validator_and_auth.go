@@ -137,11 +137,7 @@ func AuthMiddleware(basePath string, spec *openapi3.T, oidcBaseURL *string,
 			},
 		},
 		Skipper: func(c echo.Context) bool {
-			// Only skip if not within the basePath
-			if !strings.HasPrefix(c.Path(), basePath) {
-				return true
-			}
-			return false
+			return !pathHasBasePath(c.Request().URL.Path, basePath)
 		},
 	})
 }
@@ -159,7 +155,7 @@ func ValidatorMiddleware(basePath string, spec *openapi3.T, skipper SkipperFunc)
 			},
 		},
 		Skipper: func(c echo.Context) bool {
-			if !strings.HasPrefix(c.Path(), basePath) {
+			if !pathHasBasePath(c.Request().URL.Path, basePath) {
 				return true
 			}
 
@@ -269,21 +265,34 @@ func setUserContextFromClaims(c echo.Context, claims jwt.MapClaims) {
 }
 
 func extractRoles(claims jwt.MapClaims) []string {
-	realmAccess, ok := claims["realm_access"].(map[string]any)
-	if !ok {
-		return nil
-	}
+	roles := make([]string, 0)
+	seen := make(map[string]struct{})
 
-	rawRoles, ok := realmAccess["roles"].([]any)
-	if !ok {
-		return nil
-	}
-
-	roles := make([]string, 0, len(rawRoles))
-	for _, role := range rawRoles {
-		if s, ok := role.(string); ok {
-			roles = append(roles, s)
+	appendRoles := func(value any) {
+		values, err := stringsFromValue(value)
+		if err != nil {
+			return
+		}
+		for _, role := range values {
+			role = strings.TrimSpace(role)
+			if role == "" {
+				continue
+			}
+			if _, exists := seen[role]; exists {
+				continue
+			}
+			seen[role] = struct{}{}
+			roles = append(roles, role)
 		}
 	}
+
+	// A top-level roles claim is used by providers such as Microsoft Entra ID.
+	appendRoles(claims["roles"])
+
+	// Keycloak places realm roles below realm_access.roles.
+	if realmAccess, ok := claims["realm_access"].(map[string]any); ok {
+		appendRoles(realmAccess["roles"])
+	}
+
 	return roles
 }

@@ -58,3 +58,31 @@ Example:
       Run(8080)
 		}
 ```
+
+## Role-based authorization
+
+Role validation can be enabled through the fluent builder API:
+
+```go
+server := wshell.NewWebServer("example").
+    WithAuthentication("https://identity.example.com/realms/example").
+    WithRoleValidation(true)
+```
+
+Add `x-roles` to an OpenAPI operation alongside its bearer-token security
+requirement:
+
+```yaml
+paths:
+  /patients/{id}:
+    get:
+      security:
+        - BearerAuth: []
+      x-roles:
+        - patient-reader
+        - auditor
+```
+
+All listed roles are required. Roles are read from either the top-level JWT
+`roles` claim or Keycloak's `realm_access.roles` claim. A missing JWT produces
+HTTP 401; an authenticated caller lacking a required role receives HTTP 403.

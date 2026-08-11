@@ -47,10 +47,11 @@ func (b *APIBuilder) WithOpenTelemetry() *APIBuilder {
 	return b
 }
 
-// WithRoleValidation enables or disables role validation middleware
-// Requires x-role annotations in OpenAPI spec
+// WithRoleValidation enables operation-level authorization through x-roles in
+// the OpenAPI specification. Every listed role must be present in the
+// authenticated JWT.
 func (b *APIBuilder) WithRoleValidation(enable bool) *APIBuilder {
-	b.enableRolevalidation = enable
+	b.enableRoleValidation = enable
 	return b
 }
 
