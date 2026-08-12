@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -53,6 +54,8 @@ type APIBuilder struct {
 	primarySpecification  string
 	CustomAPITokenChecker CustomApiAuthentication
 	customErrorHandler    CustomErrorHandler
+	lifecycleMu           sync.Mutex
+	startAttempted        bool
 }
 
 func NewWebServer(appName string) *APIBuilder {
@@ -78,7 +81,7 @@ func NewWebServer(appName string) *APIBuilder {
 	return builder
 }
 
-func (b *APIBuilder) Run(listenPort int) error {
+func (b *APIBuilder) prepare() error {
 	if b.enableRoleValidation || b.enableScopeValidation {
 		for name, spec := range b.specifications {
 			if b.enableRoleValidation {
@@ -308,7 +311,7 @@ func (b *APIBuilder) Run(listenPort int) error {
 		}
 	}
 
-	return b.echo.Start(fmt.Sprintf(":%d", listenPort))
+	return nil
 }
 
 func (b *APIBuilder) logHTTPError(err error, c echo.Context) {

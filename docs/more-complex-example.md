@@ -76,8 +76,11 @@ the generator configuration.
 package main
 
 import (
+    "context"
     "net/http"
     "os"
+    "os/signal"
+    "syscall"
     "time"
 
     "example.com/patient-service/internal/api"
@@ -105,18 +108,25 @@ type errorResponse struct {
 }
 
 func main() {
-    // Redis makes the rate limit consistent across multiple service instances.
-    redisClient := redis.NewClient(&redis.Options{
-        Addr: envOrDefault("REDIS_ADDR", "localhost:6379"),
-    })
-    defer redisClient.Close()
-
-    // The application configures Zerolog and uses wshell's default adapter.
     logger := zerolog.New(os.Stdout).
         With().
         Timestamp().
         Str("service", "patient-service").
         Logger()
+
+    if err := run(logger); err != nil {
+        // run has already executed all deferred application cleanup.
+        logger.Error().Err(err).Msg("patient service stopped")
+        os.Exit(1)
+    }
+}
+
+func run(logger zerolog.Logger) error {
+    // Redis makes the rate limit consistent across multiple service instances.
+    redisClient := redis.NewClient(&redis.Options{
+        Addr: envOrDefault("REDIS_ADDR", "localhost:6379"),
+    })
+    defer redisClient.Close()
 
     server := wshell.NewWebServer("patient-service").
         WithLoggerFunc(wshell.DefaultZerologAdapter(logger)).
@@ -146,8 +156,33 @@ func main() {
             _ = c.JSON(status, errorResponse{Status: status, Message: message})
         })
 
-    if err := server.Run(8080); err != nil {
-        logger.Fatal().Err(err).Msg("patient service stopped")
+    // Start returns after the port has been bound successfully.
+    running, err := server.Start(8080)
+    if err != nil {
+        return err
+    }
+
+    signalCtx, stop := signal.NotifyContext(
+        context.Background(),
+        os.Interrupt,
+        syscall.SIGTERM,
+    )
+    defer stop()
+
+    select {
+    case <-signalCtx.Done():
+        shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer cancel()
+
+        if err := running.Shutdown(shutdownCtx); err != nil {
+            _ = running.Close()
+            return err
+        }
+        return running.Wait()
+
+    case <-running.Done():
+        // Unexpected Serve failures and recovered server panics arrive here.
+        return running.Wait()
     }
 }
 
@@ -175,3 +210,5 @@ With this configuration:
 - Swagger UI is available below `/swagger`.
 - Wshell log events are emitted through the application's Zerolog instance.
 - HTTP errors use the application's JSON error representation.
+- SIGINT and SIGTERM trigger a graceful ten-second shutdown. Unexpected server
+  termination is returned from `Wait`, after which deferred cleanup still runs.

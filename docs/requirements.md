@@ -150,6 +150,14 @@ context keys:
 
 ## Cross-cutting service behavior
 
+- `Start` binds the listener synchronously and serves requests asynchronously,
+  returning a lifecycle handle with `Done`, `Wait`, `Shutdown`, `Close`, and
+  `Address`.
+- Configuration and binding errors are returned by `Start`; unexpected Serve
+  errors and recovered Serve panics are returned by `Wait`.
+- Graceful shutdown allows applications to coordinate OS signals and execute
+  their own deferred cleanup. `Run` remains the blocking compatibility wrapper.
+- An `APIBuilder` can be started only once.
 - Requests receive or retain a correlation ID, and the response exposes it.
 - Source-IP detection prefers the supported proxy headers and stores a
   canonical IP value in the Echo context.

@@ -75,6 +75,47 @@ Available context keys:
 - `ContextKey_SourceIP`
 - `ContextKey_Correlation`
 
+### Server lifecycle and graceful shutdown
+
+`Start` binds the port synchronously and then serves requests in the background.
+It returns a `RunningServer`, allowing the application to react to either an OS
+shutdown signal or an unexpected server failure while its own deferred cleanup
+handlers remain active:
+
+```go
+running, err := server.Start(8080)
+if err != nil {
+    return err // Includes configuration and port-binding failures.
+}
+
+signalCtx, stop := signal.NotifyContext(
+    context.Background(),
+    os.Interrupt,
+    syscall.SIGTERM,
+)
+defer stop()
+
+select {
+case <-signalCtx.Done():
+    shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+
+    if err := running.Shutdown(shutdownCtx); err != nil {
+        _ = running.Close() // Force-close after a failed graceful shutdown.
+        return err
+    }
+    return running.Wait()
+
+case <-running.Done():
+    return running.Wait() // Reports unexpected Serve errors or recovered panics.
+}
+```
+
+Use this pattern inside a function whose `defer` statements release resources
+such as Redis clients, telemetry providers, and database connections. `Run`
+remains available as a blocking compatibility wrapper around `Start` and
+`Wait`. A builder can only be started once.
+
 ### Swagger UI
 
 Load one or more OpenAPI documents and enable Swagger UI through the builder.
