@@ -7,6 +7,7 @@ const (
 	ContextKey_FamilyName    = "family_name"
 	ContextKey_EmailVerified = "email_verified"
 	ContextKey_Roles         = "roles"
+	ContextKey_Scopes        = "scopes"
 	ContextKey_SourceIP      = "source_ip"
 	ContextKey_Correlation   = "correlation_id"
 )

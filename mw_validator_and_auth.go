@@ -262,6 +262,7 @@ func setUserContextFromClaims(c echo.Context, claims jwt.MapClaims) {
 	}
 
 	c.Set(ContextKey_Roles, extractRoles(claims))
+	c.Set(ContextKey_Scopes, extractScopes(claims))
 }
 
 func extractRoles(claims jwt.MapClaims) []string {
@@ -295,4 +296,29 @@ func extractRoles(claims jwt.MapClaims) []string {
 	}
 
 	return roles
+}
+
+func extractScopes(claims jwt.MapClaims) []string {
+	scopes := make([]string, 0)
+	seen := make(map[string]struct{})
+
+	appendScopes := func(value any) {
+		values, err := scopesFromValue(value)
+		if err != nil {
+			return
+		}
+		for _, scope := range values {
+			if _, exists := seen[scope]; exists {
+				continue
+			}
+			seen[scope] = struct{}{}
+			scopes = append(scopes, scope)
+		}
+	}
+
+	// RFC 9068 uses scope; Microsoft Entra ID commonly uses scp.
+	appendScopes(claims["scope"])
+	appendScopes(claims["scp"])
+
+	return scopes
 }

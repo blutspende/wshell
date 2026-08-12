@@ -24,6 +24,9 @@ paths:
       x-roles:
         - widget-reader
         - auditor
+      x-scopes:
+        - widgets:read
+        - audit
       parameters:
         - name: id
           in: path
@@ -161,6 +164,101 @@ func TestRoleValidator(t *testing.T) {
 	}
 }
 
+func TestScopeValidator(t *testing.T) {
+	spec := loadRoleTestSpec(t)
+
+	tests := []struct {
+		name       string
+		scopes     any
+		setScopes  bool
+		wantStatus int
+		wantCalled bool
+	}{
+		{
+			name:       "space-delimited scope claim contains every scope",
+			scopes:     "openid widgets:read audit",
+			setScopes:  true,
+			wantCalled: true,
+		},
+		{
+			name:       "array scope claim contains every scope",
+			scopes:     []any{"audit", "widgets:read"},
+			setScopes:  true,
+			wantCalled: true,
+		},
+		{
+			name:       "one required scope is missing",
+			scopes:     "widgets:read",
+			setScopes:  true,
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "authenticated JWT has no scopes",
+			scopes:     []string{},
+			setScopes:  true,
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "JWT authentication is missing",
+			wantStatus: http.StatusUnauthorized,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := echo.New()
+			ctx := e.NewContext(
+				httptest.NewRequest(http.MethodGet, "/v1/widgets/42", nil),
+				httptest.NewRecorder(),
+			)
+			if tt.setScopes {
+				ctx.Set(ContextKey_Scopes, tt.scopes)
+			}
+
+			called := false
+			err := scopeValidatorForBasePath("/v1", spec)(func(echo.Context) error {
+				called = true
+				return nil
+			})(ctx)
+
+			if called != tt.wantCalled {
+				t.Fatalf("handler called: got %v want %v", called, tt.wantCalled)
+			}
+			if tt.wantStatus == 0 {
+				if err != nil {
+					t.Fatalf("unexpected middleware error: %v", err)
+				}
+				return
+			}
+
+			httpErr, ok := err.(*echo.HTTPError)
+			if !ok || httpErr.Code != tt.wantStatus {
+				t.Fatalf("error: got %v want HTTP %d", err, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestCombinedRoleAndScopeValidator(t *testing.T) {
+	spec := loadRoleTestSpec(t)
+	e := echo.New()
+	ctx := e.NewContext(
+		httptest.NewRequest(http.MethodGet, "/v1/widgets/42", nil),
+		httptest.NewRecorder(),
+	)
+	ctx.Set(ContextKey_Roles, []string{"widget-reader", "auditor"})
+	ctx.Set(ContextKey_Scopes, "widgets:read audit")
+
+	called := false
+	err := authorizationValidatorForBasePath("/v1", spec, true, true)(func(echo.Context) error {
+		called = true
+		return nil
+	})(ctx)
+	if err != nil || !called {
+		t.Fatalf("combined authorization failed: called=%v err=%v", called, err)
+	}
+}
+
 func TestRoleValidatorRejectsInvalidExtension(t *testing.T) {
 	spec := loadRoleTestSpec(t)
 	operation := spec.Paths.Find("/v1/widgets/{id}").Get
@@ -198,6 +296,20 @@ func TestRunRejectsInvalidRoleConfigurationBeforeStartingServer(t *testing.T) {
 	}
 }
 
+func TestRunRejectsInvalidScopeConfigurationBeforeStartingServer(t *testing.T) {
+	spec := loadRoleTestSpec(t)
+	spec.Paths.Find("/v1/widgets/{id}").Get.Extensions[scopesExtension] = []any{"widgets:read audit"}
+	builder := NewWebServer("scope-test").WithScopeValidation(true)
+	builder.specifications["invalid.yaml"] = &apiSpecification{
+		basePath: "/v1",
+		doc:      spec,
+	}
+
+	if err := builder.Run(0); err == nil {
+		t.Fatal("expected Run to reject an invalid x-scopes declaration")
+	}
+}
+
 func TestRolesFromExtensionSupportsRawJSON(t *testing.T) {
 	roles, err := rolesFromExtension(json.RawMessage(`["reader", "auditor"]`))
 	if err != nil {
@@ -220,6 +332,19 @@ func TestExtractRoles(t *testing.T) {
 	want := []string{"application-reader", "shared", "realm-admin"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("roles: got %v want %v", got, want)
+	}
+}
+
+func TestExtractScopes(t *testing.T) {
+	claims := jwt.MapClaims{
+		"scope": "openid widgets:read shared",
+		"scp":   []any{"audit", "shared"},
+	}
+
+	got := extractScopes(claims)
+	want := []string{"openid", "widgets:read", "shared", "audit"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("scopes: got %v want %v", got, want)
 	}
 }
 

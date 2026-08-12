@@ -55,6 +55,14 @@ func (b *APIBuilder) WithRoleValidation(enable bool) *APIBuilder {
 	return b
 }
 
+// WithScopeValidation enables operation-level authorization through x-scopes
+// in the OpenAPI specification. Every listed scope must be present in the
+// authenticated JWT.
+func (b *APIBuilder) WithScopeValidation(enable bool) *APIBuilder {
+	b.enableScopeValidation = enable
+	return b
+}
+
 // WithAuthentication enables OIDC authentication with the given OIDC base URL
 func (b *APIBuilder) WithAuthentication(oidcBaseURL string) *APIBuilder {
 	b.oidcBaseURL = &oidcBaseURL

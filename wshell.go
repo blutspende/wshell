@@ -39,6 +39,7 @@ type APIBuilder struct {
 	enableSwagger         bool
 	enableOpenTelemetry   bool
 	enableRoleValidation  bool
+	enableScopeValidation bool
 	logger                zerolog.Logger
 	servers               *[]string
 	oidcBaseURL           *string
@@ -62,14 +63,15 @@ func NewWebServer(appName string) *APIBuilder {
 		enableSwagger:    false,
 		//enableOpenTelemetry: false,
 		//	oapi:                  []oapidescriptor{},
-		requestThreshold:     -1,
-		requestWindow:        0,
-		allowOrigins:         []string{"*"},
-		allowMethods:         []string{echo.GET, echo.POST, echo.PUT, echo.PATCH, echo.DELETE, echo.OPTIONS},
-		allowHeaders:         []string{"Authorization", "Content-Type", "X-API-Key"},
-		enableRoleValidation: false,
-		applicationName:      appName,
-		specifications:       make(map[string]*apiSpecification),
+		requestThreshold:      -1,
+		requestWindow:         0,
+		allowOrigins:          []string{"*"},
+		allowMethods:          []string{echo.GET, echo.POST, echo.PUT, echo.PATCH, echo.DELETE, echo.OPTIONS},
+		allowHeaders:          []string{"Authorization", "Content-Type", "X-API-Key"},
+		enableRoleValidation:  false,
+		enableScopeValidation: false,
+		applicationName:       appName,
+		specifications:        make(map[string]*apiSpecification),
 	}
 	builder.echo.HideBanner = true
 	builder.echo.Binder = &MergePatchBinder{Binder: builder.echo.Binder}
@@ -78,10 +80,17 @@ func NewWebServer(appName string) *APIBuilder {
 }
 
 func (b *APIBuilder) Run(listenPort int) error {
-	if b.enableRoleValidation {
+	if b.enableRoleValidation || b.enableScopeValidation {
 		for name, spec := range b.specifications {
-			if err := validateRoleExtensions(spec.doc); err != nil {
-				return fmt.Errorf("invalid role configuration in OpenAPI specification %q: %w", name, err)
+			if b.enableRoleValidation {
+				if err := validateRoleExtensions(spec.doc); err != nil {
+					return fmt.Errorf("invalid role configuration in OpenAPI specification %q: %w", name, err)
+				}
+			}
+			if b.enableScopeValidation {
+				if err := validateScopeExtensions(spec.doc); err != nil {
+					return fmt.Errorf("invalid scope configuration in OpenAPI specification %q: %w", name, err)
+				}
 			}
 		}
 	}
@@ -218,9 +227,14 @@ func (b *APIBuilder) Run(listenPort int) error {
 			b.echo.Use(AuthMiddleware(spec.basePath, spec.doc, b.oidcBaseURL, b.CustomAPITokenChecker))
 			b.echo.Use(ValidatorMiddleware(spec.basePath, spec.doc, xmlSkipper))
 
-			// Enforce operation-level x-roles annotations if enabled.
-			if b.enableRoleValidation {
-				b.echo.Use(roleValidatorForBasePath(spec.basePath, spec.doc))
+			// Roles and scopes share one operation lookup, even when both are enabled.
+			if b.enableRoleValidation || b.enableScopeValidation {
+				b.echo.Use(authorizationValidatorForBasePath(
+					spec.basePath,
+					spec.doc,
+					b.enableRoleValidation,
+					b.enableScopeValidation,
+				))
 			}
 		}
 	}
