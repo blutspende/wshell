@@ -90,17 +90,20 @@ get:
   security:
     - BearerAuth: []
   x-roles:
-    - patient-reader
-    - auditor
+    anyOf:
+      - patient-reader
+      - auditor
 ```
 
-- `x-roles` must be a non-empty array of non-empty strings.
-- Every listed role is required (AND semantics).
+- `x-roles` must be an object containing exactly one `anyOf` property.
+- `x-roles.anyOf` must be a non-empty array of non-empty strings.
+- Every listed role independently authorizes the operation (OR semantics); the
+  caller needs at least one matching role.
 - Additional caller roles are allowed.
 - Matching is exact and case-sensitive after trimming surrounding whitespace.
 - Operations without `x-roles` have no role restriction.
 - Missing validated JWT role context results in HTTP 401.
-- An authenticated JWT caller missing a required role receives HTTP 403.
+- An authenticated JWT caller without any listed role receives HTTP 403.
 - Invalid declarations fail server startup when role validation is enabled.
 
 ### `x-scopes`
@@ -150,6 +153,10 @@ context keys:
 - Requests receive or retain a correlation ID, and the response exposes it.
 - Source-IP detection prefers the supported proxy headers and stores a
   canonical IP value in the Echo context.
+- Source-IP resolution prefers `CF-Connecting-IP`, then the last
+  `X-Forwarded-For` entry, and finally the direct `RemoteAddr` peer address.
+- Forwarding headers are intended for deployments whose origin accepts traffic
+  only from trusted proxies such as Cloudflare.
 - Request logging includes available correlation and source information without
   exposing credentials.
 - Logging uses a lightweight structured `LoggerFunc` contract. New builders use
@@ -158,8 +165,13 @@ context keys:
   fields, original error, deepest wrapped cause, caller, and an error-time
   runtime stack so callers can adapt them to their chosen logging library.
 - The wshell module has no direct dependency on a specific logging framework.
-- Rate limiting can use Redis or the existing in-memory behavior.
+- Rate limiting is applied per resolved source IP and returns HTTP 429 after the
+  configured threshold.
+- Rate limiting can fall back to in-memory counters for one service instance.
+  Redis is required for consistent limits across horizontally scaled instances.
 - Prometheus metrics and OpenTelemetry instrumentation are optional.
+- OpenTelemetry providers and exporters, including an OTLP exporter for Jaeger,
+  are configured by the consuming application.
 - Configured CORS origins, methods, and headers are honored.
 - Merge-patch binding preserves its specialized request semantics.
 - Custom error handlers receive validation, authentication, authorization, and

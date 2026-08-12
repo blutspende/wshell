@@ -22,8 +22,9 @@ paths:
   /v1/widgets/{id}:
     get:
       x-roles:
-        - widget-reader
-        - auditor
+        anyOf:
+          - widget-reader
+          - auditor
       x-scopes:
         - widgets:read
         - audit
@@ -54,7 +55,8 @@ paths:
   /v10/admin:
     get:
       x-roles:
-        - admin
+        anyOf:
+          - admin
       responses:
         "200":
           description: ok
@@ -73,9 +75,16 @@ func TestRoleValidator(t *testing.T) {
 		wantCalled bool
 	}{
 		{
-			name:       "all required roles",
+			name:       "first anyOf role authorizes",
 			path:       "/v1/widgets/42",
-			roles:      []string{"widget-reader", "auditor"},
+			roles:      []string{"widget-reader"},
+			setRoles:   true,
+			wantCalled: true,
+		},
+		{
+			name:       "second anyOf role authorizes",
+			path:       "/v1/widgets/42",
+			roles:      []string{"auditor"},
 			setRoles:   true,
 			wantCalled: true,
 		},
@@ -87,9 +96,9 @@ func TestRoleValidator(t *testing.T) {
 			wantCalled: true,
 		},
 		{
-			name:       "one required role is missing",
+			name:       "none of the anyOf roles is present",
 			path:       "/v1/widgets/42",
-			roles:      []string{"widget-reader"},
+			roles:      []string{"unrelated-role"},
 			setRoles:   true,
 			wantStatus: http.StatusForbidden,
 		},
@@ -246,7 +255,7 @@ func TestCombinedRoleAndScopeValidator(t *testing.T) {
 		httptest.NewRequest(http.MethodGet, "/v1/widgets/42", nil),
 		httptest.NewRecorder(),
 	)
-	ctx.Set(ContextKey_Roles, []string{"widget-reader", "auditor"})
+	ctx.Set(ContextKey_Roles, []string{"widget-reader"})
 	ctx.Set(ContextKey_Scopes, "widgets:read audit")
 
 	called := false
@@ -262,7 +271,9 @@ func TestCombinedRoleAndScopeValidator(t *testing.T) {
 func TestRoleValidatorRejectsInvalidExtension(t *testing.T) {
 	spec := loadRoleTestSpec(t)
 	operation := spec.Paths.Find("/v1/widgets/{id}").Get
-	operation.Extensions[rolesExtension] = []any{"widget-reader", 42}
+	operation.Extensions[rolesExtension] = map[string]any{
+		"anyOf": []any{"widget-reader", 42},
+	}
 
 	if err := validateRoleExtensions(spec); err == nil {
 		t.Fatal("expected invalid x-roles configuration to be rejected")
@@ -284,7 +295,9 @@ func TestRoleValidatorRejectsInvalidExtension(t *testing.T) {
 
 func TestRunRejectsInvalidRoleConfigurationBeforeStartingServer(t *testing.T) {
 	spec := loadRoleTestSpec(t)
-	spec.Paths.Find("/v1/widgets/{id}").Get.Extensions[rolesExtension] = []any{}
+	spec.Paths.Find("/v1/widgets/{id}").Get.Extensions[rolesExtension] = map[string]any{
+		"anyOf": []any{},
+	}
 	builder := NewWebServer("role-test").WithRoleValidation(true)
 	builder.specifications["invalid.yaml"] = &apiSpecification{
 		basePath: "/v1",
@@ -311,12 +324,18 @@ func TestRunRejectsInvalidScopeConfigurationBeforeStartingServer(t *testing.T) {
 }
 
 func TestRolesFromExtensionSupportsRawJSON(t *testing.T) {
-	roles, err := rolesFromExtension(json.RawMessage(`["reader", "auditor"]`))
+	roles, err := rolesFromExtension(json.RawMessage(`{"anyOf":["reader","auditor"]}`))
 	if err != nil {
 		t.Fatalf("parse roles: %v", err)
 	}
 	if want := []string{"reader", "auditor"}; !reflect.DeepEqual(roles, want) {
 		t.Fatalf("roles: got %v want %v", roles, want)
+	}
+}
+
+func TestRolesFromExtensionRejectsAmbiguousList(t *testing.T) {
+	if _, err := rolesFromExtension([]any{"reader", "auditor"}); err == nil {
+		t.Fatal("expected x-roles without anyOf to be rejected")
 	}
 }
 

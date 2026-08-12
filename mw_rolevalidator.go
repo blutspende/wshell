@@ -21,8 +21,8 @@ const (
 // specification. Authentication must run before this middleware and place the
 // validated JWT roles in ContextKey_Roles.
 //
-// All roles listed by an operation are required. Operations without x-roles are
-// left unchanged.
+// A caller needs at least one role listed in x-roles.anyOf. Operations without
+// x-roles are left unchanged.
 func RoleValidator(spec *openapi3.T) echo.MiddlewareFunc {
 	return authorizationValidatorForBasePath("", spec, true, false)
 }
@@ -98,7 +98,7 @@ func validateOperationRoles(c echo.Context, operation *openapi3.Operation) error
 		return nil
 	}
 
-	requiredRoles, err := rolesFromExtension(rawRoles)
+	allowedRoles, err := rolesFromExtension(rawRoles)
 	if err != nil {
 		return echo.NewHTTPError(
 			http.StatusInternalServerError,
@@ -110,7 +110,7 @@ func validateOperationRoles(c echo.Context, operation *openapi3.Operation) error
 	if !authenticatedWithJWT {
 		return echo.NewHTTPError(http.StatusUnauthorized, "JWT authentication required")
 	}
-	if !hasRequiredValues(userRoles, requiredRoles) {
+	if !hasAnyRequiredValue(userRoles, allowedRoles) {
 		return echo.NewHTTPError(http.StatusForbidden, "insufficient role")
 	}
 	return nil
@@ -207,7 +207,35 @@ func scopesFromContext(c echo.Context) ([]string, bool) {
 }
 
 func rolesFromExtension(raw any) ([]string, error) {
-	return stringListFromExtension(raw, rolesExtension, "role", false)
+	var value any
+	switch extension := raw.(type) {
+	case map[string]any:
+		if len(extension) != 1 {
+			return nil, errors.New("x-roles must contain only anyOf")
+		}
+		var configured bool
+		value, configured = extension["anyOf"]
+		if !configured {
+			return nil, errors.New("x-roles must contain anyOf")
+		}
+	case json.RawMessage:
+		var document map[string]json.RawMessage
+		if err := json.Unmarshal(extension, &document); err != nil {
+			return nil, errors.New("x-roles must be an object containing anyOf")
+		}
+		if len(document) != 1 {
+			return nil, errors.New("x-roles must contain only anyOf")
+		}
+		var configured bool
+		value, configured = document["anyOf"]
+		if !configured {
+			return nil, errors.New("x-roles must contain anyOf")
+		}
+	default:
+		return nil, errors.New("x-roles must be an object containing anyOf")
+	}
+
+	return stringListFromExtension(value, "x-roles.anyOf", "role", false)
 }
 
 func scopesFromExtension(raw any) ([]string, error) {
@@ -287,8 +315,21 @@ func scopesFromValue(value any) ([]string, error) {
 	return scopes, nil
 }
 
-func hasRequiredRole(userRoles, requiredRoles []string) bool {
-	return hasRequiredValues(userRoles, requiredRoles)
+func hasAnyRequiredValue(actualValues, requiredValues []string) bool {
+	valueSet := make(map[string]struct{}, len(actualValues))
+	for _, value := range actualValues {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			valueSet[value] = struct{}{}
+		}
+	}
+
+	for _, required := range requiredValues {
+		if _, ok := valueSet[required]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func hasRequiredValues(actualValues, requiredValues []string) bool {
