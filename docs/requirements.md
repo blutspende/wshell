@@ -155,8 +155,12 @@ context keys:
   `Address`.
 - Configuration and binding errors are returned by `Start`; unexpected Serve
   errors and recovered Serve panics are returned by `Wait`.
-- Graceful shutdown allows applications to coordinate OS signals and execute
-  their own deferred cleanup. `Run` remains the blocking compatibility wrapper.
+- Starting the server asynchronously must allow the main application to wait
+  for either an operating-system shutdown signal or unexpected server
+  termination without blocking its own lifecycle handling.
+- On either event, the application must be able to run its deferred cleanup and
+  exit handlers and request a bounded graceful shutdown before the process
+  exits. `Run` remains the blocking compatibility wrapper.
 - An `APIBuilder` can be started only once.
 - Requests receive or retain a correlation ID, and the response exposes it.
 - Source-IP detection prefers the supported proxy headers and stores a
