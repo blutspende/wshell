@@ -43,6 +43,8 @@ security requirements.
 - `wshell_builder.go` contains the public fluent configuration methods.
 - `mw_validator_and_auth.go` handles OpenAPI validation and authentication.
 - `mw_rolevalidator.go` handles OpenAPI-driven authorization.
+- `logger.go` defines the library-neutral logging contract and standard-library
+  default.
 - Other `mw_*.go` files contain focused cross-cutting middleware.
 - Keep authentication, authorization, and schema validation conceptually
   separate, even when they share routing infrastructure.
@@ -62,6 +64,8 @@ security requirements.
   malformed.
 - Never authorize from an unverified token or caller-controlled context data.
 - Never log bearer tokens, API keys, complete JWT claims, or other credentials.
+- Keep core logging independent of third-party logging frameworks. Framework
+  adapters belong in caller code or documentation examples.
 - Validate security-related configuration before opening the server listener
   when possible.
 - Preserve the status-code and matching semantics documented in

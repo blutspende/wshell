@@ -1,13 +1,13 @@
 package wshell
 
 import (
+	"context"
+	"fmt"
 	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/labstack/echo/v4"
 	"github.com/redis/go-redis/v9"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 )
 
 func (b *APIBuilder) CustomAPITokenValidation(f CustomApiAuthentication) *APIBuilder {
@@ -35,7 +35,12 @@ func (b *APIBuilder) WithCache(redisClient *redis.Client) *APIBuilder {
 	return b
 }
 
-func (b *APIBuilder) WithLogger(logger zerolog.Logger) *APIBuilder {
+// WithLoggerFunc configures the callback that receives structured library log
+// events. Passing nil restores the standard-library system logger.
+func (b *APIBuilder) WithLoggerFunc(logger LoggerFunc) *APIBuilder {
+	if logger == nil {
+		logger = SystemLoggerFunc
+	}
 	b.logger = logger
 	return b
 }
@@ -100,12 +105,17 @@ func (b *APIBuilder) WithPrimarySpec(name string) *APIBuilder {
 func (b *APIBuilder) UseOpenAPISpecs(basePath string, oapiSpecificationPath string, publicName string) *APIBuilder {
 
 	if _, exists := b.specifications[publicName]; exists {
-		b.logger.Warn().Msgf("OpenAPI spec with name %s already exists, overwriting", publicName)
+		emitLog(b.logger, context.Background(), LogLevelWarn, "OpenAPI specification already exists; overwriting", nil, map[string]any{
+			"specification": publicName,
+		})
 	}
 
 	doc, err := openapi3.NewLoader().LoadFromFile(oapiSpecificationPath)
 	if err != nil {
-		b.logger.Error().Err(err).Msg("Failed to load OpenAPI spec")
+		emitLog(b.logger, context.Background(), LogLevelError, "failed to load OpenAPI specification", err, map[string]any{
+			"path":          oapiSpecificationPath,
+			"specification": publicName,
+		})
 		return b
 	}
 
@@ -135,11 +145,15 @@ func (b *APIBuilder) PublicAPI(basePath string, oapiSpecificationPath string, pu
 
 	b.UseOpenAPISpecs(basePath, oapiSpecificationPath, publicName)
 
-	doc := b.specifications[publicName].doc
-
-	if doc == nil {
-		log.Fatal().Msgf("Spec %s not loaded", publicName)
+	specification, exists := b.specifications[publicName]
+	if !exists || specification == nil || specification.doc == nil {
+		err := fmt.Errorf("OpenAPI specification %q not loaded", publicName)
+		emitLog(b.logger, context.Background(), LogLevelError, "cannot configure public API", err, map[string]any{
+			"specification": publicName,
+		})
+		return b
 	}
+	doc := specification.doc
 
 	// Remove paths that don't have x-public: true
 	for path, pathItem := range doc.Paths.Map() {

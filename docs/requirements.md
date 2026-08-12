@@ -13,6 +13,8 @@ without assembling the complete middleware stack themselves.
 - Existing exported names and context-key values are compatibility contracts.
 - Applications can register generated Echo handlers and custom middleware.
 - Applications can configure custom error responses.
+- Applications can replace logging through a library-neutral callback without
+  forcing a logging framework dependency.
 - Public behavior and configuration examples are documented in `README.md`.
 
 ## OpenAPI support
@@ -150,6 +152,12 @@ context keys:
   canonical IP value in the Echo context.
 - Request logging includes available correlation and source information without
   exposing credentials.
+- Logging uses a lightweight structured `LoggerFunc` contract. New builders use
+  the Go standard library logger by default.
+- Log events expose their level, message, timestamp, request context, structured
+  fields, original error, deepest wrapped cause, caller, and an error-time
+  runtime stack so callers can adapt them to their chosen logging library.
+- The wshell module has no direct dependency on a specific logging framework.
 - Rate limiting can use Redis or the existing in-memory behavior.
 - Prometheus metrics and OpenTelemetry instrumentation are optional.
 - Configured CORS origins, methods, and headers are honored.

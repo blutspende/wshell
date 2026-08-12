@@ -15,7 +15,6 @@ import (
 	echo4mw "github.com/labstack/echo/v4/middleware"
 	"github.com/oasdiff/yaml"
 	"github.com/redis/go-redis/v9"
-	"github.com/rs/zerolog"
 	echoSwagger "github.com/swaggo/echo-swagger"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo/otelecho"
 	"go.opentelemetry.io/otel"
@@ -40,7 +39,7 @@ type APIBuilder struct {
 	enableOpenTelemetry   bool
 	enableRoleValidation  bool
 	enableScopeValidation bool
-	logger                zerolog.Logger
+	logger                LoggerFunc
 	servers               *[]string
 	oidcBaseURL           *string
 	requestThreshold      int
@@ -75,7 +74,7 @@ func NewWebServer(appName string) *APIBuilder {
 	}
 	builder.echo.HideBanner = true
 	builder.echo.Binder = &MergePatchBinder{Binder: builder.echo.Binder}
-	builder.logger = zerolog.Nop() // dont log by default
+	builder.logger = SystemLoggerFunc
 	return builder
 }
 
@@ -98,8 +97,8 @@ func (b *APIBuilder) Run(listenPort int) error {
 	//-- fundamental middlewares
 	b.echo.Use(SetCorrelationID())
 	b.echo.Use(SourceIP())
-	b.echo.Use(CorrelationContextEnricher(&b.logger))
-	b.echo.Use(RequestLogger(&b.logger))
+	b.echo.Use(CorrelationContextEnricher())
+	b.echo.Use(RequestLogger(b.logger))
 	if b.requestThreshold > 0 {
 		b.echo.Use(RateLimiter(b.redisCache, b.requestThreshold, b.requestWindow))
 	}
@@ -187,18 +186,24 @@ func (b *APIBuilder) Run(listenPort int) error {
 			//-- encode as json
 			jsonData, err := spec.doc.MarshalJSON()
 			if err != nil {
-				b.logger.Error().Err(err).Msg("Failed to marshal OpenAPI spec to JSON")
+				emitLog(b.logger, nil, LogLevelError, "failed to marshal OpenAPI spec to JSON", err, map[string]any{
+					"specification": key,
+				})
 				return err
 			}
 			//-- encode as yaml
 			yamlInterface, err := spec.doc.MarshalYAML()
 			if err != nil {
-				b.logger.Error().Err(err).Msg("Failed to marshal OpenAPI spec to YAML")
+				emitLog(b.logger, nil, LogLevelError, "failed to marshal OpenAPI spec to YAML", err, map[string]any{
+					"specification": key,
+				})
 				return err
 			}
 			yamlData, err := yaml.Marshal(yamlInterface)
 			if err != nil {
-				b.logger.Error().Err(err).Msg("Failed to convert YAML interface to bytes")
+				emitLog(b.logger, nil, LogLevelError, "failed to convert OpenAPI YAML", err, map[string]any{
+					"specification": key,
+				})
 				return err
 			}
 			b.echo.GET("swagger/"+key, func(c echo.Context) error {
@@ -224,7 +229,17 @@ func (b *APIBuilder) Run(listenPort int) error {
 				}
 			}
 
-			b.echo.Use(AuthMiddleware(spec.basePath, spec.doc, b.oidcBaseURL, b.CustomAPITokenChecker))
+			authMiddleware, err := newAuthMiddleware(
+				spec.basePath,
+				spec.doc,
+				b.oidcBaseURL,
+				b.CustomAPITokenChecker,
+				b.logger,
+			)
+			if err != nil {
+				return fmt.Errorf("configure authentication for OpenAPI specification %q: %w", key, err)
+			}
+			b.echo.Use(authMiddleware)
 			b.echo.Use(ValidatorMiddleware(spec.basePath, spec.doc, xmlSkipper))
 
 			// Roles and scopes share one operation lookup, even when both are enabled.
@@ -254,8 +269,10 @@ func (b *APIBuilder) Run(listenPort int) error {
 
 			//-- create only a response if no response has been sent yet, otherwise just log the error
 			if c.Response().Committed {
+				b.logHTTPError(err, c)
 				return
 			}
+			b.logHTTPError(err, c)
 
 			status := http.StatusInternalServerError
 			message := "Internal Server Error"
@@ -271,8 +288,10 @@ func (b *APIBuilder) Run(listenPort int) error {
 
 			//-- create only a response if no response has been sent yet, otherwise just log the error
 			if c.Response().Committed {
+				b.logHTTPError(err, c)
 				return
 			}
+			b.logHTTPError(err, c)
 
 			status := http.StatusInternalServerError
 			var he *echo.HTTPError
@@ -290,4 +309,26 @@ func (b *APIBuilder) Run(listenPort int) error {
 	}
 
 	return b.echo.Start(fmt.Sprintf(":%d", listenPort))
+}
+
+func (b *APIBuilder) logHTTPError(err error, c echo.Context) {
+	status := http.StatusInternalServerError
+	var httpError *echo.HTTPError
+	if errors.As(err, &httpError) {
+		status = httpError.Code
+	}
+
+	level := LogLevelWarn
+	if status >= http.StatusInternalServerError {
+		level = LogLevelError
+	}
+
+	req := c.Request()
+	emitLog(b.logger, req.Context(), level, "http request failed", err, map[string]any{
+		"method":               req.Method,
+		"path":                 req.URL.Path,
+		"status":               status,
+		ContextKey_SourceIP:    c.Get(ContextKey_SourceIP),
+		ContextKey_Correlation: c.Get(ContextKey_Correlation),
+	})
 }

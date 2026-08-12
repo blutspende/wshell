@@ -1,25 +1,21 @@
 package wshell
 
-import (
-	"github.com/labstack/echo/v4"
-	"github.com/rs/zerolog"
-)
+import "github.com/labstack/echo/v4"
 
-func RequestLogger(baseLogger *zerolog.Logger) echo.MiddlewareFunc {
+// RequestLogger logs basic request metadata without headers or credentials.
+func RequestLogger(logger LoggerFunc) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			lgr, _ := c.Get("logger").(*zerolog.Logger)
-			if lgr == nil {
-				lgr = baseLogger
-			}
 			req := c.Request()
 			sourceIP, _ := c.Get(ContextKey_SourceIP).(string)
+			correlationID, _ := c.Get(ContextKey_Correlation).(string)
 
-			lgr.Debug().
-				Str("method", req.Method).
-				Str("uri", req.RequestURI).
-				Str("source_ip", sourceIP).
-				Msg("http request")
+			emitLog(logger, req.Context(), LogLevelDebug, "http request", nil, map[string]any{
+				"method":               req.Method,
+				"path":                 req.URL.Path,
+				ContextKey_SourceIP:    sourceIP,
+				ContextKey_Correlation: correlationID,
+			})
 
 			return next(c)
 		}

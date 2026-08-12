@@ -1,24 +1,34 @@
 package wshell
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"io"
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"github.com/rs/zerolog"
 )
 
-func CorrelationContextEnricher(baseLogger *zerolog.Logger) echo.MiddlewareFunc {
+type correlationContextKey struct{}
+
+// CorrelationIDFromContext returns the correlation ID added to a request's Go
+// context by CorrelationContextEnricher.
+func CorrelationIDFromContext(ctx context.Context) string {
+	value, _ := ctx.Value(correlationContextKey{}).(string)
+	return value
+}
+
+// CorrelationContextEnricher copies the Echo correlation ID into the request's
+// standard Go context so LoggerFunc implementations and downstream code can use
+// it without depending on Echo.
+func CorrelationContextEnricher() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			cid, _ := c.Get(ContextKey_Correlation).(string)
-			reqLogger := baseLogger.With().Str(ContextKey_Correlation, cid).Logger()
-			c.Set("logger", &reqLogger)
-
 			req := c.Request()
-			c.SetRequest(req.WithContext(reqLogger.WithContext(req.Context())))
+			ctx := context.WithValue(req.Context(), correlationContextKey{}, cid)
+			c.SetRequest(req.WithContext(ctx))
 
 			return next(c)
 		}

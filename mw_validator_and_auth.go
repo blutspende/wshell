@@ -17,7 +17,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/oapi-codegen/echo-middleware"
-	"github.com/rs/zerolog/log"
 )
 
 type SkipperFunc func(echo.Context) bool
@@ -27,19 +26,55 @@ var errAuthSkipped = errors.New("authentication skipped due to alternate scheme"
 // AuthMiddleware handles authentication (JWT Bearer and API Key)
 func AuthMiddleware(basePath string, spec *openapi3.T, oidcBaseURL *string,
 	customAPITokenChecker CustomApiAuthentication) echo.MiddlewareFunc {
+	middleware, err := newAuthMiddleware(
+		basePath,
+		spec,
+		oidcBaseURL,
+		customAPITokenChecker,
+		SystemLoggerFunc,
+	)
+	if err == nil {
+		return middleware
+	}
+
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			return echo.NewHTTPError(http.StatusInternalServerError, "authentication is not configured").SetInternal(err)
+		}
+	}
+}
+
+func newAuthMiddleware(
+	basePath string,
+	spec *openapi3.T,
+	oidcBaseURL *string,
+	customAPITokenChecker CustomApiAuthentication,
+	logger LoggerFunc,
+) (echo.MiddlewareFunc, error) {
 
 	var jwks *keyfunc.JWKS
 	if oidcBaseURL != nil {
 		jwksURL, err := resolveJWKSURL(*oidcBaseURL)
 		if err != nil {
-			log.Fatal().Err(err).Msgf("Failed to resolve JWKS endpoint from %s", *oidcBaseURL)
+			wrapped := fmt.Errorf("resolve JWKS endpoint from %s: %w", *oidcBaseURL, err)
+			emitLog(logger, context.Background(), LogLevelError, "failed to resolve JWKS endpoint", wrapped, map[string]any{
+				"oidc_base_url": *oidcBaseURL,
+			})
+			return nil, wrapped
 		}
 		jwks, err = keyfunc.Get(jwksURL, keyfunc.Options{
 			RefreshInterval:   time.Hour,
 			RefreshUnknownKID: true,
 		})
 		if err != nil || jwks == nil {
-			log.Fatal().Err(err).Msgf("Failed to initialize JWKS from %s", jwksURL)
+			if err == nil {
+				err = errors.New("JWKS client is nil")
+			}
+			wrapped := fmt.Errorf("initialize JWKS from %s: %w", jwksURL, err)
+			emitLog(logger, context.Background(), LogLevelError, "failed to initialize JWKS", wrapped, map[string]any{
+				"jwks_url": jwksURL,
+			})
+			return nil, wrapped
 		}
 	}
 
@@ -58,12 +93,12 @@ func AuthMiddleware(basePath string, spec *openapi3.T, oidcBaseURL *string,
 
 				// Skip authentication if no security requirements are defined
 				if len(input.SecurityScheme.Type) == 0 {
-					log.Debug().Msg("No security requirements defined, skipping authentication")
+					emitLog(logger, ctx, LogLevelDebug, "no security requirements defined; skipping authentication", nil, nil)
 					return nil
 				}
 
 				if oidcBaseURL == nil {
-					log.Debug().Msg("No OIDC configuration found, rejecting requests. No further info provided in the response for security reasons.")
+					emitLog(logger, ctx, LogLevelDebug, "no OIDC configuration found; rejecting request", nil, nil)
 					return echo.NewHTTPError(http.StatusUnauthorized, "")
 				}
 
@@ -103,7 +138,9 @@ func AuthMiddleware(basePath string, spec *openapi3.T, oidcBaseURL *string,
 						return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
 					}
 
-					log.Trace().Msgf("API token authentication successful for email: %s", email)
+					emitLog(logger, echoCtx.Request().Context(), LogLevelTrace, "API token authentication successful", nil, map[string]any{
+						ContextKey_UserEmail: email,
+					})
 					echoCtx.Set(ContextKey_UserEmail, email)
 					echoCtx.Set(ContextKey_GivenName, firstname)
 					echoCtx.Set(ContextKey_FamilyName, lastname)
@@ -139,7 +176,7 @@ func AuthMiddleware(basePath string, spec *openapi3.T, oidcBaseURL *string,
 		Skipper: func(c echo.Context) bool {
 			return !pathHasBasePath(c.Request().URL.Path, basePath)
 		},
-	})
+	}), nil
 }
 
 // ValidatorMiddleware handles OpenAPI schema validation
