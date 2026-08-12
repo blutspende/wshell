@@ -37,6 +37,7 @@ Example:
   * ContextKey_FamilyName   
   * ContextKey_EmailVerified
   * ContextKey_Roles        
+  * ContextKey_Scopes
   * ContextKey_SourceIP     
   * ContextKey_Correlation  
 
@@ -59,18 +60,20 @@ Example:
 		}
 ```
 
-## Role-based authorization
+## Role- and scope-based authorization
 
-Role validation can be enabled through the fluent builder API:
+Role and scope validation can be enabled independently through the fluent
+builder API:
 
 ```go
 server := wshell.NewWebServer("example").
     WithAuthentication("https://identity.example.com/realms/example").
-    WithRoleValidation(true)
+    WithRoleValidation(true).
+    WithScopeValidation(true)
 ```
 
-Add `x-roles` to an OpenAPI operation alongside its bearer-token security
-requirement:
+Add `x-roles` and/or `x-scopes` to an OpenAPI operation alongside its
+bearer-token security requirement:
 
 ```yaml
 paths:
@@ -81,8 +84,15 @@ paths:
       x-roles:
         - patient-reader
         - auditor
+      x-scopes:
+        - patients:read
+        - audit
 ```
 
 All listed roles are required. Roles are read from either the top-level JWT
 `roles` claim or Keycloak's `realm_access.roles` claim. A missing JWT produces
 HTTP 401; an authenticated caller lacking a required role receives HTTP 403.
+
+Scopes work analogously through `x-scopes`; all listed scopes are required.
+They are read from the JWT `scope` or `scp` claim. Both space-delimited strings
+and string arrays are supported. Missing scopes result in HTTP 403.
