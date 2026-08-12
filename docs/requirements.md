@@ -13,8 +13,8 @@ without assembling the complete middleware stack themselves.
 - Existing exported names and context-key values are compatibility contracts.
 - Applications can register generated Echo handlers and custom middleware.
 - Applications can configure custom error responses.
-- Applications can replace logging through a library-neutral callback without
-  forcing a logging framework dependency.
+- Applications can replace logging through the library-neutral `LoggerFunc`
+  callback or use the provided Zerolog adapter.
 - Public behavior and configuration examples are documented in `README.md`.
 
 ## OpenAPI support
@@ -164,7 +164,8 @@ context keys:
 - Log events expose their level, message, timestamp, request context, structured
   fields, original error, deepest wrapped cause, caller, and an error-time
   runtime stack so callers can adapt them to their chosen logging library.
-- The wshell module has no direct dependency on a specific logging framework.
+- `DefaultZerologAdapter` provides the standard mapping from `LogEvent` to a
+  caller-supplied Zerolog logger and can be wrapped by application adapters.
 - Rate limiting is applied per resolved source IP and returns HTTP 429 after the
   configured threshold.
 - Rate limiting can fall back to in-memory counters for one service instance.

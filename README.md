@@ -186,79 +186,42 @@ Example:
 ### Logging
 
 By default, wshell writes structured events through Go's `log.Default()`.
-Applications can connect any logging library with `WithLoggerFunc`. Every event
+Applications can connect another logger with `WithLoggerFunc`. Every event
 contains its level, message, timestamp, context, structured fields, original
 error, deepest wrapped cause, caller information, and a runtime stack for error
 events.
 
-For example, an application can adapt events to Zerolog without making Zerolog
-a dependency of wshell:
+Wshell includes `DefaultZerologAdapter`, which maps all of this information to a
+supplied Zerolog logger:
 
 ```go
-package main
+logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
 
-import (
-    "fmt"
+server := wshell.NewWebServer("example").
+    WithLoggerFunc(wshell.DefaultZerologAdapter(logger))
+```
 
-    "github.com/blutspende/wshell"
-    "github.com/rs/zerolog"
-)
+A custom application adapter can wrap the default adapter to enrich every
+event without reimplementing its error and runtime mapping:
 
-func zerologAdapter(logger zerolog.Logger) wshell.LoggerFunc {
+```go
+func applicationLogAdapter(logger zerolog.Logger) wshell.LoggerFunc {
+    defaultAdapter := wshell.DefaultZerologAdapter(logger)
+
     return func(entry wshell.LogEvent) {
-        level := zerolog.InfoLevel
-        switch entry.Level {
-        case wshell.LogLevelTrace:
-            level = zerolog.TraceLevel
-        case wshell.LogLevelDebug:
-            level = zerolog.DebugLevel
-        case wshell.LogLevelWarn:
-            level = zerolog.WarnLevel
-        case wshell.LogLevelError:
-            level = zerolog.ErrorLevel
-        }
-
-        event := logger.WithLevel(level).
-            Ctx(entry.Context).
-            Time("time", entry.Time)
-
+        fields := make(map[string]any, len(entry.Fields)+1)
         for key, value := range entry.Fields {
-            event.Interface(key, value)
+            fields[key] = value
         }
-        if entry.Runtime.Caller.File != "" {
-            event.Str("caller", fmt.Sprintf(
-                "%s:%d",
-                entry.Runtime.Caller.File,
-                entry.Runtime.Caller.Line,
-            ))
-        }
-        if entry.Err != nil {
-            event.Err(entry.Err)
-        }
-        if entry.Cause != nil {
-            event.Str("cause", entry.Cause.Error())
-        }
-        if len(entry.Runtime.Stack) > 0 {
-            stack := make([]string, 0, len(entry.Runtime.Stack))
-            for _, frame := range entry.Runtime.Stack {
-                stack = append(stack, fmt.Sprintf(
-                    "%s:%d %s",
-                    frame.File,
-                    frame.Line,
-                    frame.Function,
-                ))
-            }
-            event.Strs("stack", stack)
-        }
+        fields["application"] = "patient-service"
+        entry.Fields = fields
 
-        event.Msg(entry.Message)
+        defaultAdapter(entry)
     }
 }
 
-func buildServer(logger zerolog.Logger) *wshell.APIBuilder {
-    return wshell.NewWebServer("example").
-        WithLoggerFunc(zerologAdapter(logger))
-}
+server := wshell.NewWebServer("example").
+    WithLoggerFunc(applicationLogAdapter(logger))
 ```
 
 ### Role- and scope-based authorization

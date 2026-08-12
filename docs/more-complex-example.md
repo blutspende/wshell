@@ -76,7 +76,6 @@ the generator configuration.
 package main
 
 import (
-    "fmt"
     "net/http"
     "os"
     "time"
@@ -112,7 +111,7 @@ func main() {
     })
     defer redisClient.Close()
 
-    // Zerolog belongs to the application; wshell only receives an adapter.
+    // The application configures Zerolog and uses wshell's default adapter.
     logger := zerolog.New(os.Stdout).
         With().
         Timestamp().
@@ -120,7 +119,7 @@ func main() {
         Logger()
 
     server := wshell.NewWebServer("patient-service").
-        WithLoggerFunc(zerologAdapter(logger)).
+        WithLoggerFunc(wshell.DefaultZerologAdapter(logger)).
         // Discover the JWKS endpoint and validate bearer tokens.
         WithAuthentication(envOrDefault(
             "OIDC_ISSUER",
@@ -159,58 +158,6 @@ func envOrDefault(name, fallback string) string {
     return fallback
 }
 
-// zerologAdapter maps wshell's library-neutral events to Zerolog while
-// preserving structured fields, the original error, cause, caller, and stack.
-func zerologAdapter(logger zerolog.Logger) wshell.LoggerFunc {
-    return func(entry wshell.LogEvent) {
-        level := zerolog.InfoLevel
-        switch entry.Level {
-        case wshell.LogLevelTrace:
-            level = zerolog.TraceLevel
-        case wshell.LogLevelDebug:
-            level = zerolog.DebugLevel
-        case wshell.LogLevelWarn:
-            level = zerolog.WarnLevel
-        case wshell.LogLevelError:
-            level = zerolog.ErrorLevel
-        }
-
-        event := logger.WithLevel(level).
-            Ctx(entry.Context).
-            Time("event_time", entry.Time)
-
-        for key, value := range entry.Fields {
-            event.Interface(key, value)
-        }
-        if entry.Runtime.Caller.File != "" {
-            event.Str("caller", fmt.Sprintf(
-                "%s:%d",
-                entry.Runtime.Caller.File,
-                entry.Runtime.Caller.Line,
-            ))
-        }
-        if entry.Err != nil {
-            event.Err(entry.Err)
-        }
-        if entry.Cause != nil {
-            event.Str("cause", entry.Cause.Error())
-        }
-        if len(entry.Runtime.Stack) > 0 {
-            stack := make([]string, 0, len(entry.Runtime.Stack))
-            for _, frame := range entry.Runtime.Stack {
-                stack = append(stack, fmt.Sprintf(
-                    "%s:%d %s",
-                    frame.File,
-                    frame.Line,
-                    frame.Function,
-                ))
-            }
-            event.Strs("stack", stack)
-        }
-
-        event.Msg(entry.Message)
-    }
-}
 ```
 
 ## Runtime behavior

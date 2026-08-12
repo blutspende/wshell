@@ -12,6 +12,7 @@ require (
 	github.com/oapi-codegen/echo-middleware v1.0.2
 	github.com/oasdiff/yaml v0.1.1
 	github.com/redis/go-redis/v9 v9.21.0
+	github.com/rs/zerolog v1.35.1
 	github.com/swaggo/echo-swagger v1.5.2
 	go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo/otelecho v0.69.0
 	go.opentelemetry.io/otel v1.44.0
