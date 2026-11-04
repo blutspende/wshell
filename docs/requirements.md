@@ -19,6 +19,14 @@ without assembling the complete middleware stack themselves.
 
 ## OpenAPI support
 
+- OpenAPI 3.0, 3.1, and 3.2 documents are supported, including `query` and
+  `additionalOperations` in 3.2. Registered Echo handlers and allowed CORS
+  methods must include any custom HTTP methods used by the application.
+- Specification loading or validation errors prevent `Start` and `Run` from
+  opening the listener. A successful reload under the same public name clears
+  the corresponding error.
+- `PublicAPI` retains paths with at least one `x-public: true` operation across
+  all supported HTTP methods. All operations on a retained path are preserved.
 - Requests are matched by HTTP method and OpenAPI path template.
 - Parameterized paths such as `/patients/{id}` are supported.
 - Request parameters and bodies are validated against their specification.
@@ -28,6 +36,7 @@ without assembling the complete middleware stack themselves.
   different specification.
 - Unknown routes remain the responsibility of the OpenAPI request validator.
 - Swagger UI can expose the configured specifications when enabled.
+- Swagger UI assets support OpenAPI 3.2 and are served locally without a CDN.
 - CORS preflight requests retain the configured CORS behavior.
 - XML request validation remains skipped for the `/fhir` base path.
 
@@ -185,7 +194,11 @@ context keys:
 - Prometheus metrics and OpenTelemetry instrumentation are optional.
 - OpenTelemetry providers and exporters, including an OTLP exporter for Jaeger,
   are configured by the consuming application.
-- Configured CORS origins, methods, and headers are honored.
+- Configured CORS origins, methods, and headers are honored for preflight and
+  actual cross-origin requests. Disallowed origins receive no CORS permission
+  headers.
+- CORS credentials are disabled by default. Enabling them requires explicit
+  allowed origins; the wildcard origin `*` is rejected with credentials.
 - Merge-patch binding preserves its specialized request semantics.
 - Custom error handlers receive validation, authentication, authorization, and
   application HTTP errors before a response is committed.

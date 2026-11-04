@@ -75,6 +75,23 @@ Available context keys:
 - `ContextKey_SourceIP`
 - `ContextKey_Correlation`
 
+### CORS
+
+Cross-origin access defaults to all origins without credentials and supports
+`GET`, `HEAD`, `POST`, `PUT`, `PATCH`, and `DELETE`. Restrict production APIs to
+their browser clients and opt into credentialed requests only with explicit
+origins:
+
+```go
+server := wshell.NewWebServer("example").
+    AllowOrigins("https://portal.example.com").
+    AllowMethods(http.MethodGet, http.MethodPost).
+    AllowHeaders("Authorization", "Content-Type", "X-API-Key").
+    AllowCredentials(true)
+```
+
+`AllowCredentials(true)` cannot be combined with the wildcard origin `*`.
+
 ### Server lifecycle and graceful shutdown
 
 `Start` binds the port synchronously and then serves requests in the background.
@@ -130,6 +147,18 @@ server := wshell.NewWebServer("example").
 ```
 
 After the server starts, Swagger UI is available at `/swagger`.
+
+OpenAPI 3.0, 3.1, and 3.2 documents are supported, including the 3.2 `query`
+operation and `additionalOperations` for custom HTTP methods. Register custom
+methods with Echo's `Add` method. For browser requests, include these methods
+in `AllowMethods` when configuring CORS. Swagger UI 5.32.0 is bundled locally
+and requires no CDN access.
+
+`UseOpenAPISpecs` and `PublicAPI` validate documents when loading them. Loading
+or validation errors are returned by `Start` (or `Run`) before the listener is
+opened. Reloading a valid document under the same public name clears its error.
+`PublicAPI` retains paths with an `x-public: true` operation, including custom
+methods; all operations on a retained path remain present.
 
 ### Request throttling
 
