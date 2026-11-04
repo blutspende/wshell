@@ -208,6 +208,12 @@ context keys:
   configured threshold.
 - Rate limiting can fall back to in-memory counters for one service instance.
   Redis is required for consistent limits across horizontally scaled instances.
+- In-memory rate limiting sweeps expired counters on the next local limiter
+  access after each one-minute cleanup interval. No background goroutine is
+  required. Active counters are preserved, and the local store holds at most
+  10,000 client keys; new clients receive HTTP 429 when the store is full until
+  capacity is freed. Existing clients retain their budgets. Enabled request
+  throttling requires a positive time window.
 - Prometheus metrics and OpenTelemetry instrumentation are optional.
 - OpenTelemetry providers and exporters, including an OTLP exporter for Jaeger,
   are configured by the consuming application.

@@ -3,6 +3,7 @@ package wshell
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -87,5 +88,52 @@ func TestInMemoryLimiterStartsNewWindowAfterExpiry(t *testing.T) {
 	limiter.mu.Unlock()
 	if bucket.count != 1 {
 		t.Fatalf("new-window count: got %d want 1", bucket.count)
+	}
+}
+
+func TestInMemoryLimiterCleansExpiredBuckets(t *testing.T) {
+	limiter := newInMemoryLimiter()
+	now := time.Now()
+	limiter.buckets["expired"] = &inMemoryBucket{count: 1, resetAt: now.Add(-time.Second)}
+	limiter.buckets["live"] = &inMemoryBucket{count: 2, resetAt: now.Add(time.Hour)}
+	if !limiter.allow("new", 1, time.Minute) {
+		t.Fatal("new client rejected")
+	}
+	if _, exists := limiter.buckets["expired"]; exists {
+		t.Fatal("expired client was retained")
+	}
+	if limiter.buckets["live"].count != 2 || limiter.allow("live", 2, time.Hour) {
+		t.Fatal("cleanup reset a live client's budget")
+	}
+	// Sweeps are periodic rather than scanning every request.
+	limiter.buckets["new"].resetAt = now.Add(-time.Second)
+	limiter.allow("another", 1, time.Minute)
+	if _, exists := limiter.buckets["new"]; !exists {
+		t.Fatal("cleanup ran again before the interval elapsed")
+	}
+	limiter.nextCleanup = now.Add(-time.Second)
+	limiter.allow("after-interval", 1, time.Minute)
+	if _, exists := limiter.buckets["new"]; exists {
+		t.Fatal("next cleanup did not remove expired client")
+	}
+}
+
+func TestInMemoryLimiterCapsBucketsWithoutEviction(t *testing.T) {
+	limiter := newInMemoryLimiter()
+	now := time.Now()
+	limiter.nextCleanup = now.Add(time.Minute)
+	for i := 0; i < maxInMemoryBuckets; i++ {
+		limiter.buckets[strconv.Itoa(i)] = &inMemoryBucket{count: 1, resetAt: now.Add(time.Hour)}
+	}
+	if limiter.allow("new-client", 2, time.Hour) || len(limiter.buckets) != maxInMemoryBuckets {
+		t.Fatal("limiter admitted a new client beyond its capacity")
+	}
+	if !limiter.allow("0", 2, time.Hour) || limiter.allow("0", 2, time.Hour) {
+		t.Fatal("existing client's budget was not preserved")
+	}
+	limiter.buckets["1"].resetAt = now.Add(-time.Second)
+	limiter.nextCleanup = now.Add(-time.Second)
+	if !limiter.allow("new-client", 2, time.Hour) || len(limiter.buckets) != maxInMemoryBuckets {
+		t.Fatal("expired bucket did not free capacity")
 	}
 }

@@ -14,9 +14,15 @@ type inMemoryBucket struct {
 }
 
 type inMemoryLimiter struct {
-	mu      sync.Mutex
-	buckets map[string]*inMemoryBucket
+	mu          sync.Mutex
+	buckets     map[string]*inMemoryBucket
+	nextCleanup time.Time
 }
+
+const (
+	inMemoryCleanupInterval = time.Minute
+	maxInMemoryBuckets      = 10000
+)
 
 func newInMemoryLimiter() *inMemoryLimiter {
 	return &inMemoryLimiter{
@@ -29,8 +35,20 @@ func (l *inMemoryLimiter) allow(key string, maxRequests int64, window time.Durat
 	defer l.mu.Unlock()
 
 	now := time.Now()
+	if !now.Before(l.nextCleanup) {
+		for key, bucket := range l.buckets {
+			if !now.Before(bucket.resetAt) {
+				delete(l.buckets, key)
+			}
+		}
+		l.nextCleanup = now.Add(inMemoryCleanupInterval)
+	}
 	bucket, ok := l.buckets[key]
-	if !ok || now.After(bucket.resetAt) {
+	if !ok || !now.Before(bucket.resetAt) {
+		// Never evict a live client's counter to admit a new client.
+		if !ok && len(l.buckets) >= maxInMemoryBuckets {
+			return false
+		}
 		l.buckets[key] = &inMemoryBucket{
 			count:   1,
 			resetAt: now.Add(window),

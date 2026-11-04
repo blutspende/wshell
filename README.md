@@ -213,6 +213,12 @@ mandatory prerequisite for horizontally scaled deployments because otherwise
 each instance maintains an independent limit. Requests exceeding the limit
 receive HTTP 429.
 
+Expired local counters are removed on the next limiter access after a one-minute
+cleanup interval. The local store holds at most 10,000 client keys; when full,
+new clients receive HTTP 429 until cleanup frees capacity. Active clients keep
+their counters and remaining budgets. Enabled throttling requires a positive
+time window.
+
 ### Source IP
 
 The source-IP middleware is enabled automatically by `Run` and was designed for
