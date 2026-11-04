@@ -47,6 +47,11 @@ without assembling the complete middleware stack themselves.
 ### JWT bearer authentication
 
 - OIDC configuration is resolved through the provider's discovery document.
+- Discovery and JWKS HTTP requests have a ten-second timeout. Their responses
+  are limited to 1 MiB, including responses without a declared content length.
+- Unknown JWT key IDs may trigger at most one JWKS refresh per minute per
+  specification, in addition to the initial setup fetch. Cached keys continue to
+  work while refreshes are throttled; periodic refreshes run hourly.
 - JWT signatures and token validity are checked against the provider's JWKS.
 - Claims are used only after successful token validation.
 - The authenticated identity is made available through exported Echo context
@@ -173,6 +178,16 @@ context keys:
   exit handlers and request a bounded graceful shutdown before the process
   exits. `Run` remains the blocking compatibility wrapper.
 - An `APIBuilder` can be started only once.
+- HTTP server defaults are a ten-second read-header timeout, thirty-second read
+  and write timeouts, and a 120-second idle timeout. `WithHTTPTimeouts` replaces
+  these settings; zero disables an individual timeout, and negative durations
+  fail startup. Long-lived streaming handlers may need a disabled or extended
+  write timeout.
+- Request bodies default to a 10 MiB limit, enforced before authentication and
+  OpenAPI validation read them. Both declared and actually read lengths are
+  checked; oversized bodies return HTTP 413 through the configured error handler.
+  `WithRequestBodyLimit` sets the byte limit, zero disables it, and negative
+  limits fail startup.
 - Requests receive or retain a correlation ID, and the response exposes it.
 - Source-IP detection prefers the supported proxy headers and stores a
   canonical IP value in the Echo context.

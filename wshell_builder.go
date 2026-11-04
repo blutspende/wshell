@@ -81,6 +81,21 @@ func (b *APIBuilder) ThrottleRequests(threshold int, window time.Duration) *APIB
 	return b
 }
 
+// WithRequestBodyLimit sets the maximum request body size in bytes. The default
+// is 10 MiB. Zero disables the limit; a negative limit prevents server startup.
+func (b *APIBuilder) WithRequestBodyLimit(maxBytes int64) *APIBuilder {
+	b.requestBodyLimit = maxBytes
+	return b
+}
+
+// WithHTTPTimeouts replaces the HTTP server timeouts. The defaults are 10 seconds
+// for headers, 30 seconds for reads and writes, and 120 seconds for idle connections.
+// Zero disables an individual timeout; negative values prevent server startup.
+func (b *APIBuilder) WithHTTPTimeouts(timeouts HTTPTimeouts) *APIBuilder {
+	b.httpTimeouts = timeouts
+	return b
+}
+
 // AllowOrigins sets the allowed origins for CORS
 func (b *APIBuilder) AllowOrigins(origins ...string) *APIBuilder {
 	b.allowOrigins = origins

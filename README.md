@@ -163,6 +163,37 @@ methods; all operations on a retained path remain present.
 OpenAPI base paths must not be empty or whitespace-only. Use `/` explicitly to
 mount a specification at the root; invalid base paths prevent server startup.
 
+### Request sizes and HTTP timeouts
+
+Requests are limited to **10 MiB**, including bodies without `Content-Length`.
+The limit runs before authentication and OpenAPI validation buffer a body;
+exceeding it returns HTTP 413 through the configured error handler.
+
+The HTTP server defaults to 10 seconds for reading headers, 30 seconds for
+reading a request and writing a response, and 120 seconds for idle connections.
+Adjust these settings for larger uploads or streaming responses:
+
+```go
+server := wshell.NewWebServer("example").
+    WithRequestBodyLimit(32 << 20). // 32 MiB
+    WithHTTPTimeouts(wshell.HTTPTimeouts{
+        ReadHeaderTimeout: 10 * time.Second,
+        ReadTimeout:       60 * time.Second,
+        WriteTimeout:      0, // Disable for long-lived streaming responses.
+        IdleTimeout:       120 * time.Second,
+    })
+```
+
+`WithHTTPTimeouts` replaces all four timeouts. Zero disables an individual
+timeout; `WithRequestBodyLimit(0)` disables the body limit. Negative values
+prevent startup.
+
+OIDC discovery and JWKS requests have a ten-second timeout and a 1 MiB response
+limit. Unknown key IDs can trigger at most one JWKS refresh per minute per
+specification, in addition to the initial fetch. Known keys remain available,
+and the key set is also refreshed hourly. A key rotation during the cooldown
+can require retrying a request after the next refresh.
+
 ### Request throttling
 
 `ThrottleRequests` limits requests per resolved source IP within a fixed time
