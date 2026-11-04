@@ -114,6 +114,7 @@ func (b *APIBuilder) WithPrimarySpec(name string) *APIBuilder {
 // UseOpenAPISpecs loads and validates an OpenAPI document. Start and Run return
 // any loading or validation error before opening the listener. Successfully
 // reloading the same public name clears its previous error.
+// basePath must not be empty or whitespace-only; use / for a root mount.
 func (b *APIBuilder) UseOpenAPISpecs(basePath string, oapiSpecificationPath string, publicName string) *APIBuilder {
 
 	if _, exists := b.specifications[publicName]; exists {

@@ -25,6 +25,8 @@ without assembling the complete middleware stack themselves.
 - Specification loading or validation errors prevent `Start` and `Run` from
   opening the listener. A successful reload under the same public name clears
   the corresponding error.
+- Specifications require a non-empty base path. Empty or whitespace-only base
+  paths fail startup before opening the listener; root mounts explicitly use `/`.
 - `PublicAPI` retains paths with at least one `x-public: true` operation across
   all supported HTTP methods. All operations on a retained path are preserved.
 - Requests are matched by HTTP method and OpenAPI path template.

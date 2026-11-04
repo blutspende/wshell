@@ -192,3 +192,35 @@ func TestInvalidOpenAPIPreventsStartup(t *testing.T) {
 		t.Fatalf("valid reload did not clear previous error: %v", err)
 	}
 }
+
+func TestOpenAPIRejectsEmptyBasePath(t *testing.T) {
+	path := writeOpenAPITestFile(t, openAPI32Document("QUERY"))
+	for _, basePath := range []string{"", " ", "\t\n"} {
+		for _, public := range []bool{false, true} {
+			builder := NewWebServer("empty-base-path").WithLoggerFunc(func(LogEvent) {})
+			if public {
+				builder.PublicAPI(basePath, path, "api.yaml")
+			} else {
+				builder.UseOpenAPISpecs(basePath, path, "api.yaml")
+			}
+			running, err := builder.Start(0)
+			if running != nil || err == nil || !strings.Contains(err.Error(), "non-empty base path") || builder.echo.Listener != nil {
+				t.Fatalf("basePath=%q public=%v: running=%v err=%v", basePath, public, running, err)
+			}
+		}
+	}
+	// A root mount must explicitly use / and still enforce authentication.
+	document := strings.Replace(openAPI32Document("QUERY"), `"paths":`, `"security":[{"BearerAuth":[]}],"components":{"securitySchemes":{"BearerAuth":{"type":"http","scheme":"bearer"}}},"paths":`, 1)
+	builder := NewWebServer("root").WithLoggerFunc(func(LogEvent) {}).UseOpenAPISpecs("/", writeOpenAPITestFile(t, document), "api.yaml")
+	builder.echo.Add("QUERY", "/v1/widgets/:id", func(c echo.Context) error { return c.NoContent(200) })
+	if err := builder.prepare(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("QUERY", "/v1/widgets/1", strings.NewReader(`{"kind":"widget"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	builder.echo.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("root mount bypassed authentication: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}

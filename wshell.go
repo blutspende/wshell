@@ -86,6 +86,11 @@ func (b *APIBuilder) prepare() error {
 	for name, err := range b.specificationErrors {
 		return fmt.Errorf("configure OpenAPI specification %q: %w", name, err)
 	}
+	for name, spec := range b.specifications {
+		if strings.TrimSpace(spec.basePath) == "" {
+			return fmt.Errorf("OpenAPI specification %q requires a non-empty base path; use / for the root path", name)
+		}
+	}
 	if b.allowCredentials {
 		if len(b.allowOrigins) == 0 {
 			return errors.New("CORS credentials require at least one explicit allowed origin")

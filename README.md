@@ -160,6 +160,9 @@ opened. Reloading a valid document under the same public name clears its error.
 `PublicAPI` retains paths with an `x-public: true` operation, including custom
 methods; all operations on a retained path remain present.
 
+OpenAPI base paths must not be empty or whitespace-only. Use `/` explicitly to
+mount a specification at the root; invalid base paths prevent server startup.
+
 ### Request throttling
 
 `ThrottleRequests` limits requests per resolved source IP within a fixed time
