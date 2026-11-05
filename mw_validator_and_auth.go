@@ -23,6 +23,14 @@ type SkipperFunc func(echo.Context) bool
 
 var errAuthSkipped = errors.New("authentication skipped due to alternate scheme")
 
+const (
+	identityProviderTimeout  = 10 * time.Second
+	maxIdentityDocumentBytes = 1 << 20
+	jwksRefreshRateLimit     = time.Minute
+)
+
+var identityProviderClient = &http.Client{Timeout: identityProviderTimeout}
+
 // AuthMiddleware handles authentication (JWT Bearer and API Key)
 func AuthMiddleware(basePath string, spec *openapi3.T, oidcBaseURL *string,
 	customAPITokenChecker CustomApiAuthentication) echo.MiddlewareFunc {
@@ -62,10 +70,7 @@ func newAuthMiddleware(
 			})
 			return nil, wrapped
 		}
-		jwks, err = keyfunc.Get(jwksURL, keyfunc.Options{
-			RefreshInterval:   time.Hour,
-			RefreshUnknownKID: true,
-		})
+		jwks, err = loadJWKS(jwksURL, identityProviderClient)
 		if err != nil || jwks == nil {
 			if err == nil {
 				err = errors.New("JWKS client is nil")
@@ -210,7 +215,42 @@ type oidcDiscovery struct {
 	JWKSURI string `json:"jwks_uri"`
 }
 
+func loadJWKS(jwksURL string, client *http.Client) (*keyfunc.JWKS, error) {
+	return keyfunc.Get(jwksURL, keyfunc.Options{
+		Client:            client,
+		RefreshInterval:   time.Hour,
+		RefreshUnknownKID: true,
+		RefreshRateLimit:  jwksRefreshRateLimit,
+		RefreshTimeout:    identityProviderTimeout,
+		ResponseExtractor: func(_ context.Context, resp *http.Response) (json.RawMessage, error) {
+			return readIdentityDocument(resp)
+		},
+	})
+}
+
+func readIdentityDocument(resp *http.Response) (json.RawMessage, error) {
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("identity endpoint returned %d", resp.StatusCode)
+	}
+	if resp.ContentLength > maxIdentityDocumentBytes {
+		return nil, errors.New("identity document exceeds 1 MiB limit")
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxIdentityDocumentBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxIdentityDocumentBytes {
+		return nil, errors.New("identity document exceeds 1 MiB limit")
+	}
+	return body, nil
+}
+
 func resolveJWKSURL(base string) (string, error) {
+	return resolveJWKSURLWithClient(base, identityProviderClient)
+}
+
+func resolveJWKSURLWithClient(base string, client *http.Client) (string, error) {
 	if base == "" {
 		return "", errors.New("missing OIDC base URL")
 	}
@@ -225,17 +265,11 @@ func resolveJWKSURL(base string) (string, error) {
 		return "", fmt.Errorf("build discovery request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("fetch discovery document: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("discovery endpoint returned %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
+	body, err := readIdentityDocument(resp)
 	if err != nil {
 		return "", fmt.Errorf("read discovery document: %w", err)
 	}

@@ -16,7 +16,6 @@ import (
 	echo4mw "github.com/labstack/echo/v4/middleware"
 	"github.com/oasdiff/yaml"
 	"github.com/redis/go-redis/v9"
-	echoSwagger "github.com/swaggo/echo-swagger"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo/otelecho"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
@@ -26,6 +25,15 @@ type OapiRegisterFunc func(*echo.Echo)
 
 type CustomErrorHandler (func(status int, message string, ctx echo.Context))
 type CustomApiAuthentication func(ctx echo.Context, apitoken, sourceIP string) (email string, firstname string, lastname string, valid bool, err error)
+
+// HTTPTimeouts configures the HTTP server's connection deadlines. Zero disables
+// the corresponding timeout; negative durations are rejected during startup.
+type HTTPTimeouts struct {
+	ReadHeaderTimeout time.Duration
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	IdleTimeout       time.Duration
+}
 
 type apiSpecification struct {
 	basePath string
@@ -45,12 +53,16 @@ type APIBuilder struct {
 	oidcBaseURL           *string
 	requestThreshold      int
 	requestWindow         time.Duration
+	requestBodyLimit      int64
+	httpTimeouts          HTTPTimeouts
 	allowOrigins          []string
 	allowMethods          []string
 	allowHeaders          []string
+	allowCredentials      bool
 	additionalMiddlewares []echo.MiddlewareFunc
 	applicationName       string
 	specifications        map[string]*apiSpecification
+	specificationErrors   map[string]error
 	primarySpecification  string
 	CustomAPITokenChecker CustomApiAuthentication
 	customErrorHandler    CustomErrorHandler
@@ -65,10 +77,17 @@ func NewWebServer(appName string) *APIBuilder {
 		enableSwagger:    false,
 		//enableOpenTelemetry: false,
 		//	oapi:                  []oapidescriptor{},
-		requestThreshold:      -1,
-		requestWindow:         0,
+		requestThreshold: -1,
+		requestWindow:    0,
+		requestBodyLimit: 10 << 20,
+		httpTimeouts: HTTPTimeouts{
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       120 * time.Second,
+		},
 		allowOrigins:          []string{"*"},
-		allowMethods:          []string{echo.GET, echo.POST, echo.PUT, echo.PATCH, echo.DELETE, echo.OPTIONS},
+		allowMethods:          []string{echo.GET, echo.HEAD, echo.POST, echo.PUT, echo.PATCH, echo.DELETE},
 		allowHeaders:          []string{"Authorization", "Content-Type", "X-API-Key"},
 		enableRoleValidation:  false,
 		enableScopeValidation: false,
@@ -82,6 +101,35 @@ func NewWebServer(appName string) *APIBuilder {
 }
 
 func (b *APIBuilder) prepare() error {
+	for name, err := range b.specificationErrors {
+		return fmt.Errorf("configure OpenAPI specification %q: %w", name, err)
+	}
+	for name, spec := range b.specifications {
+		if strings.TrimSpace(spec.basePath) == "" {
+			return fmt.Errorf("OpenAPI specification %q requires a non-empty base path; use / for the root path", name)
+		}
+	}
+	if b.requestBodyLimit < 0 {
+		return errors.New("request body limit must not be negative")
+	}
+	if b.httpTimeouts.ReadHeaderTimeout < 0 || b.httpTimeouts.ReadTimeout < 0 ||
+		b.httpTimeouts.WriteTimeout < 0 || b.httpTimeouts.IdleTimeout < 0 {
+		return errors.New("HTTP timeouts must not be negative")
+	}
+	if b.requestThreshold > 0 && b.requestWindow <= 0 {
+		return errors.New("request throttling requires a positive time window")
+	}
+	if b.allowCredentials {
+		if len(b.allowOrigins) == 0 {
+			return errors.New("CORS credentials require at least one explicit allowed origin")
+		}
+		for _, origin := range b.allowOrigins {
+			if origin == "*" {
+				return errors.New("CORS credentials require explicit allowed origins; wildcard origin '*' is not permitted")
+			}
+		}
+	}
+
 	if b.enableRoleValidation || b.enableScopeValidation {
 		for name, spec := range b.specifications {
 			if b.enableRoleValidation {
@@ -97,6 +145,13 @@ func (b *APIBuilder) prepare() error {
 		}
 	}
 
+	for _, server := range []*http.Server{b.echo.Server, b.echo.TLSServer} {
+		server.ReadHeaderTimeout = b.httpTimeouts.ReadHeaderTimeout
+		server.ReadTimeout = b.httpTimeouts.ReadTimeout
+		server.WriteTimeout = b.httpTimeouts.WriteTimeout
+		server.IdleTimeout = b.httpTimeouts.IdleTimeout
+	}
+
 	//-- fundamental middlewares
 	b.echo.Use(SetCorrelationID())
 	b.echo.Use(SourceIP())
@@ -104,6 +159,10 @@ func (b *APIBuilder) prepare() error {
 	b.echo.Use(RequestLogger(b.logger))
 	if b.requestThreshold > 0 {
 		b.echo.Use(RateLimiter(b.redisCache, b.requestThreshold, b.requestWindow))
+	}
+	if b.requestBodyLimit > 0 {
+		// Bound reads before authentication or schema validation buffers a body.
+		b.echo.Use(requestBodyLimit(b.requestBodyLimit))
 	}
 
 	//-- use opentelemetry
@@ -147,29 +206,26 @@ func (b *APIBuilder) prepare() error {
 
 		//-- make /swagger path catch everything below it
 		//-- and provide multiple specs in swagger-ui
-		b.echo.GET("/swagger/*", func(c echo.Context) error {
-			if c.Request().URL.RawQuery != "" {
-				return c.Redirect(http.StatusFound, "/swagger")
+		urls := make([]string, 0, len(b.specifications))
+
+		if _, ok := b.specifications[b.primarySpecification]; ok {
+			urls = append(urls, b.primarySpecification)
+		}
+
+		keys := make([]string, 0, len(b.specifications))
+		for k := range b.specifications {
+			if k != b.primarySpecification {
+				keys = append(keys, k)
 			}
-			return echoSwagger.EchoWrapHandler(func(cfg *echoSwagger.Config) {
-				urls := make([]string, 0, len(b.specifications))
+		}
+		sort.Strings(keys)
+		urls = append(urls, keys...)
 
-				if _, ok := b.specifications[b.primarySpecification]; ok {
-					urls = append(urls, b.primarySpecification)
-				}
-
-				keys := make([]string, 0, len(b.specifications))
-				for k := range b.specifications {
-					if k != b.primarySpecification {
-						keys = append(keys, k)
-					}
-				}
-				sort.Strings(keys)
-				urls = append(urls, keys...)
-
-				cfg.URLs = urls
-			})(c)
-		})
+		handler, err := newSwaggerUIHandler(urls)
+		if err != nil {
+			return fmt.Errorf("configure Swagger UI: %w", err)
+		}
+		b.echo.GET("/swagger/*", handler)
 	}
 
 	//-- CORS middleware must run before OpenAPI validation so browser preflight
@@ -178,7 +234,7 @@ func (b *APIBuilder) prepare() error {
 		AllowOrigins:     b.allowOrigins,
 		AllowMethods:     b.allowMethods,
 		AllowHeaders:     b.allowHeaders,
-		AllowCredentials: true,
+		AllowCredentials: b.allowCredentials,
 	}))
 
 	//-- register specifications

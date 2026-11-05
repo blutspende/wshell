@@ -81,6 +81,21 @@ func (b *APIBuilder) ThrottleRequests(threshold int, window time.Duration) *APIB
 	return b
 }
 
+// WithRequestBodyLimit sets the maximum request body size in bytes. The default
+// is 10 MiB. Zero disables the limit; a negative limit prevents server startup.
+func (b *APIBuilder) WithRequestBodyLimit(maxBytes int64) *APIBuilder {
+	b.requestBodyLimit = maxBytes
+	return b
+}
+
+// WithHTTPTimeouts replaces the HTTP server timeouts. The defaults are 10 seconds
+// for headers, 30 seconds for reads and writes, and 120 seconds for idle connections.
+// Zero disables an individual timeout; negative values prevent server startup.
+func (b *APIBuilder) WithHTTPTimeouts(timeouts HTTPTimeouts) *APIBuilder {
+	b.httpTimeouts = timeouts
+	return b
+}
+
 // AllowOrigins sets the allowed origins for CORS
 func (b *APIBuilder) AllowOrigins(origins ...string) *APIBuilder {
 	b.allowOrigins = origins
@@ -97,11 +112,24 @@ func (b *APIBuilder) AllowHeaders(headers ...string) *APIBuilder {
 	return b
 }
 
+// AllowCredentials controls whether browsers may expose responses to
+// credentialed cross-origin requests. It is disabled by default and requires
+// explicit allowed origins; combining it with the wildcard origin is rejected
+// during server startup.
+func (b *APIBuilder) AllowCredentials(allow bool) *APIBuilder {
+	b.allowCredentials = allow
+	return b
+}
+
 func (b *APIBuilder) WithPrimarySpec(name string) *APIBuilder {
 	b.primarySpecification = name
 	return b
 }
 
+// UseOpenAPISpecs loads and validates an OpenAPI document. Start and Run return
+// any loading or validation error before opening the listener. Successfully
+// reloading the same public name clears its previous error.
+// basePath must not be empty or whitespace-only; use / for a root mount.
 func (b *APIBuilder) UseOpenAPISpecs(basePath string, oapiSpecificationPath string, publicName string) *APIBuilder {
 
 	if _, exists := b.specifications[publicName]; exists {
@@ -111,13 +139,21 @@ func (b *APIBuilder) UseOpenAPISpecs(basePath string, oapiSpecificationPath stri
 	}
 
 	doc, err := openapi3.NewLoader().LoadFromFile(oapiSpecificationPath)
+	if err == nil {
+		err = doc.Validate(context.Background())
+	}
 	if err != nil {
+		if b.specificationErrors == nil {
+			b.specificationErrors = make(map[string]error)
+		}
+		b.specificationErrors[publicName] = fmt.Errorf("load or validate %s: %w", oapiSpecificationPath, err)
 		emitLog(b.logger, context.Background(), LogLevelError, "failed to load OpenAPI specification", err, map[string]any{
 			"path":          oapiSpecificationPath,
 			"specification": publicName,
 		})
 		return b
 	}
+	delete(b.specificationErrors, publicName)
 
 	// Update the spec with runtime servers if configured
 	if b.servers != nil {
@@ -144,6 +180,9 @@ func (b *APIBuilder) UseOpenAPISpecs(basePath string, oapiSpecificationPath stri
 func (b *APIBuilder) PublicAPI(basePath string, oapiSpecificationPath string, publicName string) *APIBuilder {
 
 	b.UseOpenAPISpecs(basePath, oapiSpecificationPath, publicName)
+	if b.specificationErrors[publicName] != nil {
+		return b
+	}
 
 	specification, exists := b.specifications[publicName]
 	if !exists || specification == nil || specification.doc == nil {
@@ -160,11 +199,7 @@ func (b *APIBuilder) PublicAPI(basePath string, oapiSpecificationPath string, pu
 		hasPublic := false
 
 		// Check all operations in the path
-		for _, op := range []*openapi3.Operation{
-			pathItem.Get, pathItem.Post, pathItem.Put,
-			pathItem.Delete, pathItem.Patch, pathItem.Head,
-			pathItem.Options, pathItem.Trace,
-		} {
+		for _, op := range pathItem.Operations() {
 			if op != nil {
 				if xPublic, ok := op.Extensions["x-public"]; ok {
 					if public, ok := xPublic.(bool); ok && public {
@@ -177,7 +212,7 @@ func (b *APIBuilder) PublicAPI(basePath string, oapiSpecificationPath string, pu
 
 		// Remove path if no operation has x-public: true
 		if !hasPublic {
-			delete(doc.Paths.Map(), path)
+			doc.Paths.Delete(path)
 		}
 	}
 

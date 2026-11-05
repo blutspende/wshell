@@ -19,6 +19,16 @@ without assembling the complete middleware stack themselves.
 
 ## OpenAPI support
 
+- OpenAPI 3.0, 3.1, and 3.2 documents are supported, including `query` and
+  `additionalOperations` in 3.2. Registered Echo handlers and allowed CORS
+  methods must include any custom HTTP methods used by the application.
+- Specification loading or validation errors prevent `Start` and `Run` from
+  opening the listener. A successful reload under the same public name clears
+  the corresponding error.
+- Specifications require a non-empty base path. Empty or whitespace-only base
+  paths fail startup before opening the listener; root mounts explicitly use `/`.
+- `PublicAPI` retains paths with at least one `x-public: true` operation across
+  all supported HTTP methods. All operations on a retained path are preserved.
 - Requests are matched by HTTP method and OpenAPI path template.
 - Parameterized paths such as `/patients/{id}` are supported.
 - Request parameters and bodies are validated against their specification.
@@ -28,6 +38,7 @@ without assembling the complete middleware stack themselves.
   different specification.
 - Unknown routes remain the responsibility of the OpenAPI request validator.
 - Swagger UI can expose the configured specifications when enabled.
+- Swagger UI assets support OpenAPI 3.2 and are served locally without a CDN.
 - CORS preflight requests retain the configured CORS behavior.
 - XML request validation remains skipped for the `/fhir` base path.
 
@@ -36,6 +47,11 @@ without assembling the complete middleware stack themselves.
 ### JWT bearer authentication
 
 - OIDC configuration is resolved through the provider's discovery document.
+- Discovery and JWKS HTTP requests have a ten-second timeout. Their responses
+  are limited to 1 MiB, including responses without a declared content length.
+- Unknown JWT key IDs may trigger at most one JWKS refresh per minute per
+  specification, in addition to the initial setup fetch. Cached keys continue to
+  work while refreshes are throttled; periodic refreshes run hourly.
 - JWT signatures and token validity are checked against the provider's JWKS.
 - Claims are used only after successful token validation.
 - The authenticated identity is made available through exported Echo context
@@ -162,6 +178,16 @@ context keys:
   exit handlers and request a bounded graceful shutdown before the process
   exits. `Run` remains the blocking compatibility wrapper.
 - An `APIBuilder` can be started only once.
+- HTTP server defaults are a ten-second read-header timeout, thirty-second read
+  and write timeouts, and a 120-second idle timeout. `WithHTTPTimeouts` replaces
+  these settings; zero disables an individual timeout, and negative durations
+  fail startup. Long-lived streaming handlers may need a disabled or extended
+  write timeout.
+- Request bodies default to a 10 MiB limit, enforced before authentication and
+  OpenAPI validation read them. Both declared and actually read lengths are
+  checked; oversized bodies return HTTP 413 through the configured error handler.
+  `WithRequestBodyLimit` sets the byte limit, zero disables it, and negative
+  limits fail startup.
 - Requests receive or retain a correlation ID, and the response exposes it.
 - Source-IP detection prefers the supported proxy headers and stores a
   canonical IP value in the Echo context.
@@ -182,10 +208,20 @@ context keys:
   configured threshold.
 - Rate limiting can fall back to in-memory counters for one service instance.
   Redis is required for consistent limits across horizontally scaled instances.
+- In-memory rate limiting sweeps expired counters on the next local limiter
+  access after each one-minute cleanup interval. No background goroutine is
+  required. Active counters are preserved, and the local store holds at most
+  10,000 client keys; new clients receive HTTP 429 when the store is full until
+  capacity is freed. Existing clients retain their budgets. Enabled request
+  throttling requires a positive time window.
 - Prometheus metrics and OpenTelemetry instrumentation are optional.
 - OpenTelemetry providers and exporters, including an OTLP exporter for Jaeger,
   are configured by the consuming application.
-- Configured CORS origins, methods, and headers are honored.
+- Configured CORS origins, methods, and headers are honored for preflight and
+  actual cross-origin requests. Disallowed origins receive no CORS permission
+  headers.
+- CORS credentials are disabled by default. Enabling them requires explicit
+  allowed origins; the wildcard origin `*` is rejected with credentials.
 - Merge-patch binding preserves its specialized request semantics.
 - Custom error handlers receive validation, authentication, authorization, and
   application HTTP errors before a response is committed.
