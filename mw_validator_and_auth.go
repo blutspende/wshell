@@ -313,27 +313,39 @@ func hasAlternativeScheme(input *openapi3filter.AuthenticationInput, altScheme s
 	return false
 }
 
+// setUserContextFromClaims sets user data from jwt claims in both echo.Context and generic request context for strict server handlers
 func setUserContextFromClaims(c echo.Context, claims jwt.MapClaims) {
-
+	requestContext := c.Request().Context()
 	if sub, ok := claims["sub"].(string); ok {
 		uid, _ := uuid.Parse(sub)
 		c.Set(ContextKey_UserID, uid)
+		requestContext = context.WithValue(requestContext, ContextKey_UserID, uid)
 	}
 	if email, ok := claims["email"].(string); ok {
 		c.Set(ContextKey_UserEmail, email)
+		requestContext = context.WithValue(requestContext, ContextKey_UserEmail, email)
 	}
 	if given, ok := claims["given_name"].(string); ok {
 		c.Set(ContextKey_GivenName, given)
+		requestContext = context.WithValue(requestContext, ContextKey_GivenName, given)
 	}
 	if family, ok := claims["family_name"].(string); ok {
 		c.Set(ContextKey_FamilyName, family)
+		requestContext = context.WithValue(requestContext, ContextKey_FamilyName, family)
 	}
 	if verified, ok := claims["email_verified"].(bool); ok {
 		c.Set(ContextKey_EmailVerified, verified)
+		requestContext = context.WithValue(requestContext, ContextKey_EmailVerified, verified)
 	}
+	roles := extractRoles(claims)
+	c.Set(ContextKey_Roles, roles)
+	requestContext = context.WithValue(requestContext, ContextKey_Roles, roles)
 
-	c.Set(ContextKey_Roles, extractRoles(claims))
-	c.Set(ContextKey_Scopes, extractScopes(claims))
+	scopes := extractScopes(claims)
+	c.Set(ContextKey_Scopes, scopes)
+	requestContext = context.WithValue(requestContext, ContextKey_Scopes, scopes)
+
+	c.SetRequest(c.Request().WithContext(requestContext))
 }
 
 func extractRoles(claims jwt.MapClaims) []string {

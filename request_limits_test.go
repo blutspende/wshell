@@ -31,7 +31,7 @@ func TestRequestBodyLimit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			builder := NewWebServer("body-limit").WithLoggerFunc(func(LogEvent) {}).WithRequestBodyLimit(tc.limit)
 			customStatus := 0
-			builder.CustomErrorHandling(func(status int, message string, c echo.Context) { customStatus = status; _ = c.String(status, message) })
+			builder.CustomErrorHandling(func(status int, err error, c echo.Context) { customStatus = status; _ = c.String(status, err.Error()) })
 			builder.echo.POST("/body", func(c echo.Context) error {
 				data, err := io.ReadAll(c.Request().Body)
 				if err != nil {
