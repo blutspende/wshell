@@ -23,7 +23,7 @@ import (
 
 type OapiRegisterFunc func(*echo.Echo)
 
-type CustomErrorHandler (func(status int, message string, ctx echo.Context))
+type CustomErrorHandler func(status int, err error, ctx echo.Context)
 type CustomApiAuthentication func(ctx echo.Context, apitoken, sourceIP string) (email string, firstname string, lastname string, valid bool, err error)
 
 // HTTPTimeouts configures the HTTP server's connection deadlines. Zero disables
@@ -334,13 +334,11 @@ func (b *APIBuilder) prepare() error {
 			b.logHTTPError(err, c)
 
 			status := http.StatusInternalServerError
-			message := "Internal Server Error"
 			var he *echo.HTTPError
 			if errors.As(err, &he) {
 				status = he.Code
-				message = fmt.Sprintf("%v", he.Message)
 			}
-			b.customErrorHandler(status, message, c)
+			b.customErrorHandler(status, err, c)
 		}
 	} else {
 		b.echo.HTTPErrorHandler = func(err error, c echo.Context) {
